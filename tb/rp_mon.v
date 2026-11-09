@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: CERN-OHL-P
+`include "eerie_paths.vh"
 // pci_eerie testbench helpers
 //  * captures every TLP the root port model delivers on its TRN RX interface
 //  * optional PIPE-level error injection on the endpoint side:
@@ -58,7 +59,9 @@ module rp_mon;
     // pcie_7x_top_aximm leaves cfg_pciecap_interrupt_msgnum undriven; X on it reaches the
     // PCIe capability register (0x60) and poisons that completion, for PCIE_2_1 as well
 `ifndef EERIE_APP
+`ifndef EP_ML
     initial force board.EP.cfg_pciecap_interrupt_msgnum = 5'd0;
+`endif
 `endif
 
     // legacy interrupt messages are consumed by the root port and reported on its cfg interface
@@ -70,11 +73,11 @@ module rp_mon;
     end
 
     // ---------------- error injection on the endpoint PIPE ----------------
-    wire        pclk = board.EP.pcie_7x_i.pcie_block_inst.pipe_clk;
-    wire [15:0] erxd = board.EP.pcie_7x_i.pcie_block_inst.pipe_rx0_data_gt;
-    wire [1:0]  erxk = board.EP.pcie_7x_i.pcie_block_inst.pipe_rx0_char_is_k_gt;
-    wire [15:0] etxd = board.EP.pcie_7x_i.pcie_block_inst.pipe_tx0_data_gt;
-    wire [1:0]  etxk = board.EP.pcie_7x_i.pcie_block_inst.pipe_tx0_char_is_k_gt;
+    wire        pclk = `EP_PIPE.pipe_clk;
+    wire [15:0] erxd = `EP_PIPE.pipe_rx0_data_gt;
+    wire [1:0]  erxk = `EP_PIPE.pipe_rx0_char_is_k_gt;
+    wire [15:0] etxd = `EP_PIPE.pipe_tx0_data_gt;
+    wire [1:0]  etxk = `EP_PIPE.pipe_tx0_char_is_k_gt;
     integer inj_rx, inj_tx, n_rx, n_tx, rx_cd, tx_cd;
     reg [15:0] fval;
     initial begin
@@ -90,9 +93,9 @@ module rp_mon;
         if (rx_cd == 0) begin
             $display("[%t] rp_mon: injecting bit error into EP RX TLP #%0d", $realtime, n_rx);
             fval = erxd ^ 16'h0010;
-            force board.EP.pcie_7x_i.pcie_block_inst.pipe_rx0_data_gt = fval;
+            force `EP_PIPE.pipe_rx0_data_gt = fval;
             @(posedge pclk); #100;
-            release board.EP.pcie_7x_i.pcie_block_inst.pipe_rx0_data_gt;
+            release `EP_PIPE.pipe_rx0_data_gt;
         end
         if (rx_cd >= 0) rx_cd = rx_cd - 1;
         if ((etxk[0] && etxd[7:0] == 8'hFB) || (etxk[1] && etxd[15:8] == 8'hFB)) begin
@@ -102,9 +105,9 @@ module rp_mon;
         if (tx_cd == 0) begin
             $display("[%t] rp_mon: injecting bit error into EP TX TLP #%0d", $realtime, n_tx);
             fval = etxd ^ 16'h0100;
-            force board.EP.pcie_7x_i.pcie_block_inst.pipe_tx0_data_gt = fval;
+            force `EP_PIPE.pipe_tx0_data_gt = fval;
             @(posedge pclk); #100;
-            release board.EP.pcie_7x_i.pcie_block_inst.pipe_tx0_data_gt;
+            release `EP_PIPE.pipe_tx0_data_gt;
         end
         if (tx_cd >= 0) tx_cd = tx_cd - 1;
     end

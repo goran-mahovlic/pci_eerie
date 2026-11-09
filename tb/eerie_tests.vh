@@ -143,6 +143,68 @@ begin : t_rp_link
 end
 
 // ---------------------------------------------------------------------------
+// multi-lane (EP_LANES / RP_LANES): both sides report the expected link width and the same
+// speed, then MWr/MRd of 1..32 DW through the memory application (all packet lengths mod 4)
+// ---------------------------------------------------------------------------
+else if (testname == "ml_width_test")
+begin : t_ml_width
+    integer li, j, k, len, fails, exp_w;
+    reg [31:0] base, off, exp, rp_ls, ep_ls;
+    reg found;
+    integer lens [0:7];
+    lens[0] = 1; lens[1] = 2; lens[2] = 3; lens[3] = 4; lens[4] = 5; lens[5] = 7; lens[6] = 16; lens[7] = 32;
+    fails = 0;
+`ifdef EP_LANES
+    exp_w = (`EP_LANES < `RP_LANES) ? `EP_LANES : `RP_LANES;
+`else
+    exp_w = 1;
+`endif
+    if ($value$plusargs("ml_expw=%d", k)) exp_w = k;     // e.g. an x8 pci_eerie build trains to x4
+    TSK_SIMULATION_TIMEOUT(20050);
+    TSK_SYSTEM_INITIALIZATION;
+    board.RP.cfg_usrapp.TSK_READ_CFG_DW(12'h070 >> 2); rp_ls = board.RP.cfg_usrapp.cfg_do;
+    TSK_TX_TYPE0_CONFIGURATION_READ(DEFAULT_TAG, 12'h070, 4'hF); DEFAULT_TAG = DEFAULT_TAG + 1;
+    TSK_WAIT_FOR_READ_DATA; ep_ls = P_READ_DATA;
+    $display("[%t] : ml_width_test: RP link status %h (x%0d, speed %0d), EP link status %h (x%0d, speed %0d), expected x%0d",
+             $realtime, rp_ls[31:16], rp_ls[25:20], rp_ls[19:16], ep_ls[31:16], ep_ls[25:20], ep_ls[19:16], exp_w);
+    if (rp_ls[25:20] != exp_w || ep_ls[25:20] != exp_w || rp_ls[19:16] != ep_ls[19:16]) begin
+        $display("[%t] : ml_width_test FAILED: link width / speed", $realtime); fails = fails + 1;
+    end
+    TSK_BAR_INIT;
+    base = BAR_INIT_P_BAR[0][31:0];
+    if (!$value$plusargs("ml_first=%d", k)) k = 0;      // +ml_first=N: start with lens[N]
+    for (li = k; li < 8; li = li + 1) begin
+        len = lens[li];
+        off = li * 32'h80;
+        for (j = 0; j < len * 4; j = j + 1) DATA_STORE[j] = (li * 8'h29 + j * 8'h0b + 8'h33) & 8'hff;
+        TSK_TX_MEMORY_WRITE_32(DEFAULT_TAG, 3'd0, len[9:0], base + off, (len == 1) ? 4'h0 : 4'hF, 4'hF, 1'b0);
+        DEFAULT_TAG = DEFAULT_TAG + 1;
+        TSK_TX_CLK_EAT(10);
+        fork
+            TSK_TX_MEMORY_READ_32(DEFAULT_TAG, 3'd0, len[9:0], base + off, (len == 1) ? 4'h0 : 4'hF, 4'hF);
+            rp_mon.wait_tlp(5'b01010, 5'b11111, 20000, found);
+        join
+        DEFAULT_TAG = DEFAULT_TAG + 1;
+        if (!found) begin
+            $display("[%t] : ml_width_test FAILED len %0d: no completion", $realtime, len); fails = fails + 1;
+        end else begin
+            for (k = 0; k < len; k = k + 1) begin
+                exp = {DATA_STORE[4*k], DATA_STORE[4*k+1], DATA_STORE[4*k+2], DATA_STORE[4*k+3]};
+                if (rp_mon.last[3 + k] !== exp) begin
+                    $display("[%t] : ml_width_test FAILED len %0d DW %0d: %h != %h", $realtime, len, k,
+                             rp_mon.last[3 + k], exp);
+                    fails = fails + 1;
+                end
+            end
+        end
+    end
+    if (fails == 0) $display("[%t] : ml_width_test PASSED", $realtime);
+    if (fails == 0) $display("Test Completed Successfully");
+    else $display("[%t] : TEST FAILED (%0d errors)", $realtime, fails);
+    $finish;
+end
+
+// ---------------------------------------------------------------------------
 // memory write / read-back with various lengths (needs +define EERIE_APP)
 // ---------------------------------------------------------------------------
 else if (testname == "eerie_mem_test")

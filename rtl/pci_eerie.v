@@ -19,6 +19,10 @@ module pci_eerie #(
     // ------------------------------------------------------------------
     localparam MAX_RATE  = (LINK_CAP_MAX_LINK_SPEED >= 4'h2) ? 2 : 1;
     localparam DSP       = (PCIE_CAP_DEVICE_PORT_TYPE == 4'h4);   // root port (downstream port)
+    // lanes: LINK_CAP_MAX_LINK_WIDTH (1, 2, 4, 8); links up to x4 are used (an x8 core trains to x4)
+    localparam NL        = (LINK_CAP_MAX_LINK_WIDTH >= 6'd8) ? 8 : (LINK_CAP_MAX_LINK_WIDTH >= 6'd4) ? 4 :
+                           (LINK_CAP_MAX_LINK_WIDTH >= 6'd2) ? 2 : 1;
+    localparam MAXW      = (NL >= 4) ? 4 : NL;
     localparam FAST      = (PL_FAST_TRAIN == "TRUE");
     localparam CPL_INF   = (VC0_CPL_INFINITE == "TRUE");
     localparam MPS_BYTES = 128 << DEV_CAP_MAX_PAYLOAD_SUPPORTED;
@@ -87,31 +91,44 @@ module pci_eerie #(
     eerie_reset_sync rs_u (.clk(uclk), .arst(arst), .rst(u_rst));
 
     // ------------------------------------------------------------------
-    // physical layer (PIPE clock domain)
+    // physical layer (PIPE clock domain), NL lanes
     // ------------------------------------------------------------------
-    wire        os_ts_valid, os_ts2, os_ts_inv, os_link_pad, os_lane_pad, os_eios, os_skp, os_idle2, os_pkt_start;
-    wire [7:0]  os_link, os_lane, os_nfts, os_rate, os_ctrl;
-    wire        rx_err;
-    wire        plrx_we;
-    wire [81:0] plrx_wd;
+    // one eerie_pl_rx / eerie_pl_tx per lane (ordered sets, scrambling, x1 framing on lane 0);
+    // x2 / x4 links use the deskew + eerie_pl_rx_ml receive framing and the eerie_pl_tx_ml striper
+    localparam M_EIDLE = 3'd0, M_DATA = 3'd3, M_IDLE = 3'd5;
+    wire [16*8-1:0] a_rxd  = {PIPERX7DATA, PIPERX6DATA, PIPERX5DATA, PIPERX4DATA,
+                              PIPERX3DATA, PIPERX2DATA, PIPERX1DATA, PIPERX0DATA};
+    wire [2*8-1:0]  a_rxk  = {PIPERX7CHARISK, PIPERX6CHARISK, PIPERX5CHARISK, PIPERX4CHARISK,
+                              PIPERX3CHARISK, PIPERX2CHARISK, PIPERX1CHARISK, PIPERX0CHARISK};
+    wire [8-1:0]    a_rxv  = {PIPERX7VALID, PIPERX6VALID, PIPERX5VALID, PIPERX4VALID,
+                              PIPERX3VALID, PIPERX2VALID, PIPERX1VALID, PIPERX0VALID};
+    wire [3*8-1:0]  a_rxst = {PIPERX7STATUS, PIPERX6STATUS, PIPERX5STATUS, PIPERX4STATUS,
+                              PIPERX3STATUS, PIPERX2STATUS, PIPERX1STATUS, PIPERX0STATUS};
+    wire [8-1:0]    a_rxei = {PIPERX7ELECIDLE, PIPERX6ELECIDLE, PIPERX5ELECIDLE, PIPERX4ELECIDLE,
+                              PIPERX3ELECIDLE, PIPERX2ELECIDLE, PIPERX1ELECIDLE, PIPERX0ELECIDLE};
+    wire [16*8-1:0] a_txd;
+    wire [2*8-1:0]  a_txk;
+    wire [8-1:0]    a_txei;
+    wire [8-1:0]    a_rxpol;
+
+    wire [NL-1:0]   l_tsv, l_ts2, l_inv, l_lpad, l_npad, l_eios, l_skp, l_idle2, l_pst, l_rxerr, l_pwe;
+    wire [8*NL-1:0] l_link, l_lane, l_nfts, l_rate, l_ctrl;
+    wire [82*NL-1:0] l_pwd;
+    wire [NL-1:0]   ln_v, ln_err;
+    wire [16*NL-1:0] ln_d;
+    wire [2*NL-1:0] ln_k, ln_com, ln_skp;
+    wire [NL-1:0]   l_ts_done, l_eios_done, l_idle_pair, l_busy, l_rd_en;
+
     wire        scramble_en;
     wire        pl_descr_en = scramble_en && (DISABLE_SCRAMBLING != "TRUE");
-
-    eerie_pl_rx pl_rx (
-        .clk(pclk), .rst(p_rst),
-        .pipe_rxdata(PIPERX0DATA), .pipe_rxdatak(PIPERX0CHARISK), .pipe_rxvalid(PIPERX0VALID),
-        .pipe_rxstatus(PIPERX0STATUS), .pipe_rxelecidle(PIPERX0ELECIDLE), .descramble_en(pl_descr_en),
-        .os_ts_valid(os_ts_valid), .os_ts2(os_ts2), .os_ts_inv(os_ts_inv),
-        .os_link(os_link), .os_link_pad(os_link_pad), .os_lane(os_lane), .os_lane_pad(os_lane_pad),
-        .os_nfts(os_nfts), .os_rate(os_rate), .os_ctrl(os_ctrl),
-        .os_eios(os_eios), .os_skp(os_skp), .os_idle2(os_idle2), .os_pkt_start(os_pkt_start), .rx_err(rx_err),
-        .pkt_we(plrx_we), .pkt_wd(plrx_wd)
-    );
-
     wire [2:0]  tx_mode;
     wire [7:0]  tx_link, tx_lane, tx_nfts, tx_rate, tx_ctrl;
     wire        tx_link_pad, tx_lane_pad;
-    wire        tx_ts_done, tx_eios_done, tx_idle_pair, tx_busy, eieos_clr;
+    wire [8*NL-1:0] tx_lane_v;
+    wire [NL-1:0]   tx_lane_pad_v, tx_link_pad_v, lane_en, rxpol;
+    wire [3:0]  p_width;
+    wire [1:0]  p_powerdown;
+    wire        eieos_clr;
     wire [66:0] pltx_rd_data;
     wire        pltx_rd_empty, pltx_rd_en;
     wire        retrain_p;
@@ -122,31 +139,106 @@ module pci_eerie #(
     // root port: link controls from the configuration space (user clock), synchronized below
     wire        p_dsp_retrain, p_dsp_hot, p_dsp_dis, p_dsp_tgt2, p_dl_up, p_retrain_ack;
 
-    eerie_pl_tx pl_tx (
-        .clk(pclk), .rst(p_rst),
-        .mode(tx_mode), .ts_link(tx_link), .ts_link_pad(tx_link_pad), .ts_lane(tx_lane), .ts_lane_pad(tx_lane_pad),
-        .ts_nfts(tx_nfts), .ts_rate(tx_rate), .ts_ctrl(tx_ctrl),
-        .scramble_en(pl_descr_en), .gen2(p_rate), .eieos_clr(eieos_clr),
-        .ts_done(tx_ts_done), .eios_done(tx_eios_done), .idle_pair(tx_idle_pair), .busy(tx_busy),
-        .pkt_rd_data(pltx_rd_data), .pkt_rd_empty(pltx_rd_empty), .pkt_rd_en(pltx_rd_en),
-        .pipe_txdata(PIPETX0DATA), .pipe_txdatak(PIPETX0CHARISK), .pipe_txelecidle(PIPETX0ELECIDLE)
-    );
+    wire        ml = (NL > 1) && (p_width >= 4'd2);            // x2 / x4 data path
+    wire        st_pop;                                       // striper FIFO pop
+    wire [8*NL-1:0] st_s0, st_s1;
+    wire [NL-1:0]   st_k0, st_k1;
+    wire        st_idle, st_busy;
+    wire        l0_pop;
+
+    genvar gl;
+    generate for (gl = 0; gl < NL; gl = gl + 1) begin : lane
+        eerie_pl_rx pl_rx (
+            .clk(pclk), .rst(p_rst),
+            .pipe_rxdata(a_rxd[16*gl +: 16]), .pipe_rxdatak(a_rxk[2*gl +: 2]), .pipe_rxvalid(a_rxv[gl]),
+            .pipe_rxstatus(a_rxst[3*gl +: 3]), .pipe_rxelecidle(a_rxei[gl]), .descramble_en(pl_descr_en),
+            .os_ts_valid(l_tsv[gl]), .os_ts2(l_ts2[gl]), .os_ts_inv(l_inv[gl]),
+            .os_link(l_link[8*gl +: 8]), .os_link_pad(l_lpad[gl]), .os_lane(l_lane[8*gl +: 8]), .os_lane_pad(l_npad[gl]),
+            .os_nfts(l_nfts[8*gl +: 8]), .os_rate(l_rate[8*gl +: 8]), .os_ctrl(l_ctrl[8*gl +: 8]),
+            .os_eios(l_eios[gl]), .os_skp(l_skp[gl]), .os_idle2(l_idle2[gl]), .os_pkt_start(l_pst[gl]),
+            .rx_err(l_rxerr[gl]), .pkt_we(l_pwe[gl]), .pkt_wd(l_pwd[82*gl +: 82]),
+            .ln_v(ln_v[gl]), .ln_d(ln_d[16*gl +: 16]), .ln_k(ln_k[2*gl +: 2]), .ln_com(ln_com[2*gl +: 2]),
+            .ln_skp(ln_skp[2*gl +: 2]), .ln_err(ln_err[gl])
+        );
+        wire ext = ml && (gl < p_width);
+        eerie_pl_tx pl_tx (
+            .clk(pclk), .rst(p_rst),
+            .mode(lane_en[gl] ? tx_mode : M_EIDLE),
+            .ts_link(tx_link), .ts_link_pad(tx_link_pad || tx_link_pad_v[gl]),
+            .ts_lane(gl == 0 ? tx_lane : tx_lane_v[8*gl +: 8]), .ts_lane_pad(tx_lane_pad || tx_lane_pad_v[gl]),
+            .ts_nfts(tx_nfts), .ts_rate(tx_rate), .ts_ctrl(tx_ctrl),
+            .scramble_en(pl_descr_en), .gen2(p_rate), .eieos_clr(eieos_clr),
+            .ts_done(l_ts_done[gl]), .eios_done(l_eios_done[gl]), .idle_pair(l_idle_pair[gl]), .busy(l_busy[gl]),
+            .ext_en(ext), .ext_busy(st_busy), .ext_s0(st_s0[8*gl +: 8]), .ext_s1(st_s1[8*gl +: 8]),
+            .ext_k0(st_k0[gl]), .ext_k1(st_k1[gl]), .ext_idle(st_idle),
+            .pkt_rd_data(pltx_rd_data), .pkt_rd_empty(gl == 0 ? (pltx_rd_empty || ml) : 1'b1),
+            .pkt_rd_en(l_rd_en[gl]),
+            .pipe_txdata(a_txd[16*gl +: 16]), .pipe_txdatak(a_txk[2*gl +: 2]), .pipe_txelecidle(a_txei[gl])
+        );
+        assign a_rxpol[gl] = rxpol[gl];
+    end
+    for (gl = NL; gl < 8; gl = gl + 1) begin : unused_lane
+        assign a_txd[16*gl +: 16] = 16'd0; assign a_txk[2*gl +: 2] = 2'b00; assign a_txei[gl] = 1'b1;
+        assign a_rxpol[gl] = 1'b0;
+    end
+    endgenerate
+    // lane 0 pops the packet FIFO itself at x1 (it sees the FIFO as empty while the link is x2 / x4)
+    assign l0_pop = !ml && l_rd_en[0];
+    assign pltx_rd_en = ml ? st_pop : l0_pop;
+
+    wire        plrx_we, rx_err;
+    wire [81:0] plrx_wd;
+    generate if (NL > 1) begin : mlp
+        wire       d_va, d_vb, d_ea, d_eb;
+        wire [8*NL-1:0] d_da, d_db;
+        wire [NL-1:0]   d_ka, d_kb;
+        eerie_pl_deskew #(.N(NL)) deskew (
+            .clk(pclk), .rst(p_rst || !ml), .act(lane_en),
+            .ln_v(ln_v), .ln_d(ln_d), .ln_k(ln_k), .ln_com(ln_com), .ln_skp(ln_skp), .ln_err(ln_err),
+            .o_va(d_va), .o_vb(d_vb), .o_da(d_da), .o_db(d_db), .o_ka(d_ka), .o_kb(d_kb), .o_erra(d_ea), .o_errb(d_eb)
+        );
+        wire       m_we, m_err;
+        wire [81:0] m_wd;
+        eerie_pl_rx_ml #(.N(NL)) rx_ml (
+            .clk(pclk), .rst(p_rst || !ml), .w4(p_width >= 4'd4),
+            .i_va(d_va), .i_vb(d_vb), .i_da(d_da), .i_db(d_db), .i_ka(d_ka), .i_kb(d_kb), .i_erra(d_ea), .i_errb(d_eb),
+            .rx_err(m_err), .pkt_we(m_we), .pkt_wd(m_wd)
+        );
+        eerie_pl_tx_ml #(.N(NL)) tx_ml (
+            .clk(pclk), .rst(p_rst), .en(ml), .w4(p_width >= 4'd4),
+            .run(tx_mode == M_DATA || tx_mode == M_IDLE), .data_mode(tx_mode == M_DATA),
+            .pkt_rd_data(pltx_rd_data), .pkt_rd_empty(pltx_rd_empty), .pkt_rd_en(st_pop),
+            .s0(st_s0), .s1(st_s1), .k0(st_k0), .k1(st_k1), .idle(st_idle), .busy(st_busy)
+        );
+        assign plrx_we = ml ? m_we : l_pwe[0];
+        assign plrx_wd = ml ? m_wd : l_pwd[81:0];
+        assign rx_err  = ml ? m_err : l_rxerr[0];
+    end else begin : x1p
+        assign st_pop = 1'b0; assign st_s0 = 8'd0; assign st_s1 = 8'd0; assign st_k0 = 1'b0; assign st_k1 = 1'b0;
+        assign st_idle = 1'b0; assign st_busy = 1'b0;
+        assign plrx_we = l_pwe[0]; assign plrx_wd = l_pwd[81:0]; assign rx_err = l_rxerr[0];
+    end
+    endgenerate
 
     eerie_ltssm #(
         .MAX_RATE(MAX_RATE), .FAST_TRAIN(FAST), .N_FTS_GEN1(N_FTS_GEN1), .N_FTS_GEN2(N_FTS_GEN2),
-        .UPCONFIG(UPCONFIG_CAPABLE == "TRUE"), .DSP(DSP)
+        .UPCONFIG(UPCONFIG_CAPABLE == "TRUE"), .DSP(DSP), .NL(NL), .MAXW(MAXW)
     ) ltssm (
         .clk(pclk), .rst(p_rst),
-        .pipe_txdetectrx(PIPETXRCVRDET), .pipe_powerdown(PIPETX0POWERDOWN), .pipe_rate(p_rate),
-        .pipe_rxpolarity(PIPERX0POLARITY), .i_pipe_phystatus(PIPERX0PHYSTATUS), .i_pipe_rxstatus(PIPERX0STATUS),
+        .pipe_txdetectrx(PIPETXRCVRDET), .pipe_powerdown(p_powerdown), .pipe_rate(p_rate),
+        .pipe_rxpolarity(rxpol), .i_pipe_phystatus(PIPERX0PHYSTATUS), .i_pipe_rxstatus(PIPERX0STATUS),
         .i_pipe_rxelecidle(PIPERX0ELECIDLE),
         .tx_mode(tx_mode), .tx_link(tx_link), .tx_link_pad(tx_link_pad), .tx_lane(tx_lane), .tx_lane_pad(tx_lane_pad),
         .tx_nfts(tx_nfts), .tx_rate(tx_rate), .tx_ctrl(tx_ctrl),
-        .tx_ts_done(tx_ts_done), .tx_eios_done(tx_eios_done), .tx_idle_pair(tx_idle_pair), .tx_busy(tx_busy),
+        .tx_ts_done(l_ts_done[0]), .tx_eios_done(l_eios_done[0]), .tx_idle_pair(l_idle_pair[0]), .tx_busy(l_busy[0]),
         .scramble_en(scramble_en), .eieos_clr(eieos_clr),
-        .i_os_ts_valid(os_ts_valid), .i_os_ts2(os_ts2), .i_os_ts_inv(os_ts_inv), .i_os_link(os_link),
-        .i_os_link_pad(os_link_pad), .i_os_lane(os_lane), .i_os_lane_pad(os_lane_pad), .i_os_nfts(os_nfts),
-        .i_os_rate(os_rate), .i_os_ctrl(os_ctrl), .i_os_eios(os_eios), .i_os_idle2(os_idle2),
+        .i_os_ts_valid(l_tsv[0]), .i_os_ts2(l_ts2[0]), .i_os_ts_inv(l_inv[0]), .i_os_link(l_link[7:0]),
+        .i_os_link_pad(l_lpad[0]), .i_os_lane(l_lane[7:0]), .i_os_lane_pad(l_npad[0]), .i_os_nfts(l_nfts[7:0]),
+        .i_os_rate(l_rate[7:0]), .i_os_ctrl(l_ctrl[7:0]), .i_os_eios(l_eios[0]), .i_os_idle2(l_idle2[0]),
+        .ml_ts_valid(l_tsv), .ml_ts2(l_ts2), .ml_ts_inv(l_inv), .ml_link(l_link), .ml_link_pad(l_lpad),
+        .ml_lane(l_lane), .ml_lane_pad(l_npad), .ml_rxstatus(a_rxst[3*NL-1:0]),
+        .tx_lane_v(tx_lane_v), .tx_lane_pad_v(tx_lane_pad_v), .tx_link_pad_v(tx_link_pad_v), .lane_en(lane_en),
+        .link_width(p_width),
         .retrain_req(retrain_p),
         .dsp_retrain(p_dsp_retrain), .dsp_hot_reset(p_dsp_hot), .dsp_disable(p_dsp_dis),
         .dsp_target_gen2(p_dsp_tgt2), .dsp_dl_up(p_dl_up), .dsp_retrain_ack(p_retrain_ack),
@@ -154,6 +246,7 @@ module pci_eerie #(
         .link_training(p_link_training), .partner_gen2(p_partner_gen2), .link_num(p_link_num),
         .rcvr_err_ltssm()
     );
+    assign PIPETX0POWERDOWN  = p_powerdown;
     assign PIPETXRATE        = p_rate;
     assign PIPETXDEEMPH      = 1'b1;          // -3.5 dB
     assign PIPETXMARGIN      = 3'b000;
@@ -162,12 +255,12 @@ module pci_eerie #(
 
     assign PLLTSSMSTATE      = p_ltssm;
     assign PLSELLNKRATE      = p_rate;
-    assign PLSELLNKWIDTH     = 2'b00;
+    assign PLSELLNKWIDTH     = (p_width >= 4'd8) ? 2'b11 : (p_width >= 4'd4) ? 2'b10 : (p_width >= 4'd2) ? 2'b01 : 2'b00;
     assign PLPHYLNKUPN       = !p_link_up;
     assign PLLINKGEN2CAP     = (MAX_RATE >= 2);
     assign PLLINKPARTNERGEN2SUPPORTED = p_partner_gen2;
     assign PLLINKUPCFGCAP    = 1'b0;
-    assign PLINITIALLINKWIDTH = 3'b001;
+    assign PLINITIALLINKWIDTH = (p_width >= 4'd8) ? 3'b100 : (p_width >= 4'd4) ? 3'b011 : (p_width >= 4'd2) ? 3'b010 : 3'b001;
     assign PLLANEREVERSALMODE = 2'b00;
     assign PLRXPMSTATE       = 2'b00;
     assign PLTXPMSTATE       = 3'b000;
@@ -192,6 +285,8 @@ module pci_eerie #(
     always @(posedge uclk) u_lrst <= u_rst || !u_link_up;
     wire p_lrst;                                      // same, delayed into the PIPE clock domain
     eerie_sync_bits #(.W(1), .INIT(1'b1)) sync_lrst (.clk(pclk), .d(u_lrst), .q(p_lrst));
+    wire [3:0] u_width;
+    eerie_sync_bits #(.W(4), .INIT(4'd1)) sync_w (.clk(uclk), .d(p_width), .q(u_width));
     wire u_retrain;
     eerie_sync_pulse sync_retrain (.src_clk(uclk), .src_pulse(u_retrain), .dst_clk(pclk), .dst_pulse(retrain_p));
     wire [15:0] c_lnkctl, c_lnkctl2, c_brctl;
@@ -389,7 +484,7 @@ module pci_eerie #(
         .rd_data(cfg_rd_data),
         .vend_id(s_vend_id), .dev_id(s_dev_id), .rev_id(s_rev_id), .subsys_vend_id(s_ssvid),
         .subsys_id(s_ssid), .dsn(s_dsn), .pciecap_int_msgnum(s_msgnum),
-        .link_speed(u_rate ? 4'd2 : 4'd1), .link_width(6'd1), .link_training(u_training), .dll_active(dl_up),
+        .link_speed(u_rate ? 4'd2 : 4'd1), .link_width({2'b00, u_width}), .link_training(u_training), .dll_active(dl_up),
         .intx_status(intx_state), .trn_pending(!s_trnpend_n),
         .set_ur_detected(e_ur || !s_err_ur_n), .set_corr_detected(!s_err_cor_n || e_bad_tlp || e_bad_dllp || e_rto || e_rro),
         .set_nonfatal_detected(e_poisoned), .set_fatal_detected(e_malformed || e_overflow || e_dlp),
@@ -592,23 +687,25 @@ module pci_eerie #(
     // ------------------------------------------------------------------
     // unused lanes / debug / DRP
     // ------------------------------------------------------------------
-    assign PIPERX1POLARITY = 1'b0; assign PIPERX2POLARITY = 1'b0; assign PIPERX3POLARITY = 1'b0;
-    assign PIPERX4POLARITY = 1'b0; assign PIPERX5POLARITY = 1'b0; assign PIPERX6POLARITY = 1'b0;
-    assign PIPERX7POLARITY = 1'b0;
+    assign PIPETX0DATA = a_txd[15:0];    assign PIPETX0CHARISK = a_txk[1:0];   assign PIPETX0ELECIDLE = a_txei[0];
+    assign PIPETX1DATA = a_txd[31:16];   assign PIPETX1CHARISK = a_txk[3:2];   assign PIPETX1ELECIDLE = a_txei[1];
+    assign PIPETX2DATA = a_txd[47:32];   assign PIPETX2CHARISK = a_txk[5:4];   assign PIPETX2ELECIDLE = a_txei[2];
+    assign PIPETX3DATA = a_txd[63:48];   assign PIPETX3CHARISK = a_txk[7:6];   assign PIPETX3ELECIDLE = a_txei[3];
+    assign PIPETX4DATA = a_txd[79:64];   assign PIPETX4CHARISK = a_txk[9:8];   assign PIPETX4ELECIDLE = a_txei[4];
+    assign PIPETX5DATA = a_txd[95:80];   assign PIPETX5CHARISK = a_txk[11:10]; assign PIPETX5ELECIDLE = a_txei[5];
+    assign PIPETX6DATA = a_txd[111:96];  assign PIPETX6CHARISK = a_txk[13:12]; assign PIPETX6ELECIDLE = a_txei[6];
+    assign PIPETX7DATA = a_txd[127:112]; assign PIPETX7CHARISK = a_txk[15:14]; assign PIPETX7ELECIDLE = a_txei[7];
+    assign PIPERX0POLARITY = a_rxpol[0]; assign PIPERX1POLARITY = a_rxpol[1]; assign PIPERX2POLARITY = a_rxpol[2];
+    assign PIPERX3POLARITY = a_rxpol[3]; assign PIPERX4POLARITY = a_rxpol[4]; assign PIPERX5POLARITY = a_rxpol[5];
+    assign PIPERX6POLARITY = a_rxpol[6]; assign PIPERX7POLARITY = a_rxpol[7];
     assign PIPETX1COMPLIANCE = 1'b0; assign PIPETX2COMPLIANCE = 1'b0; assign PIPETX3COMPLIANCE = 1'b0;
     assign PIPETX4COMPLIANCE = 1'b0; assign PIPETX5COMPLIANCE = 1'b0; assign PIPETX6COMPLIANCE = 1'b0;
     assign PIPETX7COMPLIANCE = 1'b0;
-    assign PIPETX1ELECIDLE = 1'b1; assign PIPETX2ELECIDLE = 1'b1; assign PIPETX3ELECIDLE = 1'b1;
-    assign PIPETX4ELECIDLE = 1'b1; assign PIPETX5ELECIDLE = 1'b1; assign PIPETX6ELECIDLE = 1'b1;
-    assign PIPETX7ELECIDLE = 1'b1;
-    assign PIPETX1DATA = 16'd0; assign PIPETX2DATA = 16'd0; assign PIPETX3DATA = 16'd0; assign PIPETX4DATA = 16'd0;
-    assign PIPETX5DATA = 16'd0; assign PIPETX6DATA = 16'd0; assign PIPETX7DATA = 16'd0;
-    assign PIPETX1CHARISK = 2'b00; assign PIPETX2CHARISK = 2'b00; assign PIPETX3CHARISK = 2'b00;
-    assign PIPETX4CHARISK = 2'b00; assign PIPETX5CHARISK = 2'b00; assign PIPETX6CHARISK = 2'b00;
-    assign PIPETX7CHARISK = 2'b00;
-    assign PIPETX1POWERDOWN = 2'b10; assign PIPETX2POWERDOWN = 2'b10; assign PIPETX3POWERDOWN = 2'b10;
-    assign PIPETX4POWERDOWN = 2'b10; assign PIPETX5POWERDOWN = 2'b10; assign PIPETX6POWERDOWN = 2'b10;
-    assign PIPETX7POWERDOWN = 2'b10;
+    // lanes outside the link are in P1 like the electrical idle lanes of the hard block
+    assign PIPETX1POWERDOWN = (NL > 1) ? p_powerdown : 2'b10; assign PIPETX2POWERDOWN = (NL > 2) ? p_powerdown : 2'b10;
+    assign PIPETX3POWERDOWN = (NL > 3) ? p_powerdown : 2'b10; assign PIPETX4POWERDOWN = (NL > 4) ? p_powerdown : 2'b10;
+    assign PIPETX5POWERDOWN = (NL > 5) ? p_powerdown : 2'b10; assign PIPETX6POWERDOWN = (NL > 6) ? p_powerdown : 2'b10;
+    assign PIPETX7POWERDOWN = (NL > 7) ? p_powerdown : 2'b10;
 
     reg drp_rdy;
     always @(posedge DRPCLK) drp_rdy <= DRPEN;

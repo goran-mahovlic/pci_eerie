@@ -30,9 +30,30 @@ if [ "${APP:-0}" = 1 ]; then DEFS="$DEFS -d EERIE_APP"; SUFFIX="${SUFFIX}_app"; 
 # RP=eerie: root port model with pci_eerie in place of its PCIE_2_1 instance (RP=hard: PCIE_2_1)
 RP=${RP:-hard}
 if [ "$RP" = eerie ]; then DEFS="$DEFS -d EERIE_RP"; SUFFIX="${SUFFIX}_rpe"; fi
+# EP_LANES=N [RP_LANES=M]: multi-lane endpoint (tb/eerie_tb_ep_ml.v: the Vivado core of the root port
+# example, renamed, configured as an endpoint, PCIE_2_1 or pci_eerie inside per config) and an
+# M-lane root port (default M = N); lanes are connected up to min(N, M)
+if [ -n "$EP_LANES" ]; then
+  RP_LANES=${RP_LANES:-$EP_LANES}
+  DEFS="$DEFS -d EP_ML -d EP_LANES=$EP_LANES -d RP_LANES=$RP_LANES"; SUFFIX="${SUFFIX}_ml${EP_LANES}x${RP_LANES}"
+fi
 SUFFIX="$SUFFIX${BUILD_TAG:+_$BUILD_TAG}"
 B=$HERE/build_$CFG$SUFFIX; mkdir -p $B; cd $B
 RPORT=$PCIE_EX/pcie_2_1_rport_7x.v
+RPTOP=$PCIE_EX/xilinx_pcie_2_1_rport_7x.v
+EXTRA=""
+if [ -n "$EP_LANES" ]; then
+  # root port top with LINK_CAP_MAX_LINK_WIDTH lanes instead of [0:0]
+  sed 's/\[0:0\]/[LINK_CAP_MAX_LINK_WIDTH-1:0]/g' "$PCIE_EX/xilinx_pcie_2_1_rport_7x.v" > xilinx_pcie_2_1_rport_7x_ml.v
+  RPTOP=$B/xilinx_pcie_2_1_rport_7x_ml.v
+  # endpoint core: the root port example's core with every module renamed rp_* -> ep_*
+  sed -E 's/\brp_([A-Za-z0-9_]+)\b/ep_\1/g; s/\bpcie_2_1_rport_7x\b/pcie_2_1_ep_7x/g' "$PCIE_EX/pcie_2_1_rport_7x.v" > pcie_2_1_ep_7x.v
+  if [ "$CFG" = eerie ]; then
+    sed -i 's/^\(\s*\)PCIE_2_1 #(  \/\/ Verilog-2001/\1pci_eerie #(/' pcie_2_1_ep_7x.v
+    [ "$(grep -c '^\s*pci_eerie #(' pcie_2_1_ep_7x.v)" = 1 ] || { echo "endpoint PCIE_2_1 instance not found" >&2; exit 1; }
+  fi
+  EXTRA="$B/pcie_2_1_ep_7x.v $EERIE/tb/eerie_tb_ep_ml.v"
+fi
 if [ "$RP" = eerie ]; then
   # rename the one PCIE_2_1 instance of the root port core (rp_pcie_7x) to pci_eerie
   sed 's/^\(\s*\)PCIE_2_1 #(  \/\/ Verilog-2001/\1pci_eerie #(/' "$PCIE_EX/pcie_2_1_rport_7x.v" > pcie_2_1_rport_7x_eerie.v
@@ -43,8 +64,10 @@ fi
   echo "verilog xil_defaultlib --include \"$EERIE/tb\" --include \"$PCIE_EX\" --include \"$EERIE/rtl\" \\"
   for f in $(eval echo $(cat $HERE/files_common.f)); do
     [ "$f" = "$PCIE_EX/pcie_2_1_rport_7x.v" ] && f=$RPORT
+    [ "$f" = "$PCIE_EX/xilinx_pcie_2_1_rport_7x.v" ] && f=$RPTOP
     echo "\"$f\" \\"
   done
+  for f in $EXTRA; do echo "\"$f\" \\"; done
   if [ "$CFG" = baseline ]; then
     echo "\"$PCIE_7X/src/pcie_block.v\" \\"
   else
@@ -55,6 +78,7 @@ fi
   fi
   echo "\"$EERIE/tb/pci_exp_usrapp_tx.v\" \\"
   echo "\"$EERIE/tb/eerie_tb_ep.v\" \\"
+  echo "\"$EERIE/tb/eerie_tb_app.v\" \\"
   echo "\"$EERIE/tb/rp_mon.v\" \\"
   echo "\"$EERIE/tb/board.v\" \\"
   echo "\"$EERIE/tb/pipe_mon.v\""

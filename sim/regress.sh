@@ -9,8 +9,19 @@
 #   sim/regress.sh rp [baseline|eerie]                 the same 9 runs plus rp_cfg_dump and rp_link_test
 #                                                      with pci_eerie as the root port (RP=eerie) and the
 #                                                      given endpoint core (default eerie)
+#   sim/regress.sh ml                                  multi-lane: ml_width_test at x2 / x4, Gen1 / Gen2,
+#                                                      pci_eerie endpoint and root port, and down-training
 HERE=$(cd "$(dirname "$0")" && pwd)
 PRE=""
+if [ "$1" = ml ]; then
+  T="SIMTIME=600000ns ml_width_test"
+  set -- "CFG=eerie EP_LANES=4 $T" "CFG=eerie EP_LANES=4 GEN2=1 $T" \
+         "CFG=eerie EP_LANES=2 $T" "CFG=eerie EP_LANES=2 GEN2=1 $T" \
+         "RP=eerie CFG=baseline EP_LANES=4 $T" "RP=eerie CFG=baseline EP_LANES=4 GEN2=1 $T" \
+         "RP=eerie CFG=eerie EP_LANES=4 $T" "RP=eerie CFG=eerie EP_LANES=4 GEN2=1 $T" \
+         "CFG=eerie EP_LANES=4 RP_LANES=1 $T" "CFG=eerie EP_LANES=4 RP_LANES=2 $T" \
+         "RP=eerie CFG=baseline EP_LANES=1 RP_LANES=4 $T" "RP=eerie CFG=baseline EP_LANES=2 RP_LANES=4 $T"
+fi
 if [ "$1" = rp ]; then PRE="RP=eerie CFG=${2:-eerie} "; set --; fi
 if [ $# -eq 0 ]; then
   set -- "pio_writeReadBack_test0" \

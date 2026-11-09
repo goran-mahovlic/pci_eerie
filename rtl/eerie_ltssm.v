@@ -6,6 +6,12 @@
 // link comes up (when both sides support it and the target link speed allows it), and is
 // the side that directs Retrain, Hot Reset and Disable.
 //
+// Lanes (NL > 1): the state machine runs on lane 0's ordered sets; per-lane bookkeeping finds
+// the lanes with a receiver (Detect) and a working TS stream (Polling), and the link width in
+// Configuration: the downstream port takes the lanes that echo its link number and assigns lane
+// numbers 0..W-1; the upstream port echoes them on its lanes (W at most MAXW, lanes outside the
+// link send PAD and then go to electrical idle). No lane reversal: lane 0 is lane 0.
+//
 // State encodings follow the PCIE_2_1 pl_ltssm_state[5:0] values (pg054).
 `timescale 1ns / 1ps
 module eerie_ltssm #(
@@ -14,7 +20,9 @@ module eerie_ltssm #(
     parameter [7:0] N_FTS_GEN1 = 8'd255,
     parameter [7:0] N_FTS_GEN2 = 8'd255,
     parameter       UPCONFIG   = 1,      // advertise Link Upconfigure Capability (TS2 symbol 4 bit 6)
-    parameter       DSP        = 0       // downstream port (root port)
+    parameter       DSP        = 0,      // downstream port (root port)
+    parameter       NL         = 1,      // lanes
+    parameter       MAXW       = 1       // widest link width used (1, 2, 4)
 ) (
     input             clk,
     input             rst,
@@ -23,7 +31,7 @@ module eerie_ltssm #(
     output reg        pipe_txdetectrx,
     output reg [1:0]  pipe_powerdown,
     output reg        pipe_rate,
-    output reg        pipe_rxpolarity,
+    output reg [NL-1:0] pipe_rxpolarity,
     input             i_pipe_phystatus,
     input      [2:0]  i_pipe_rxstatus,
     input             i_pipe_rxelecidle,
@@ -57,6 +65,21 @@ module eerie_ltssm #(
     input      [7:0]  i_os_ctrl,
     input             i_os_eios,
     input             i_os_idle2,
+    // per-lane TS reception and receiver detection (lane l in bit l / byte l)
+    input  [NL-1:0]   ml_ts_valid,
+    input  [NL-1:0]   ml_ts2,
+    input  [NL-1:0]   ml_ts_inv,
+    input  [8*NL-1:0] ml_link,
+    input  [NL-1:0]   ml_link_pad,
+    input  [8*NL-1:0] ml_lane,
+    input  [NL-1:0]   ml_lane_pad,
+    input  [3*NL-1:0] ml_rxstatus,
+    // per-lane TS fields to transmit, lanes that transmit, link width
+    output reg [8*NL-1:0] tx_lane_v,
+    output reg [NL-1:0]   tx_lane_pad_v,
+    output reg [NL-1:0]   tx_link_pad_v,
+    output reg [NL-1:0]   lane_en,
+    output reg [3:0]      link_width,
 
     // upper layer interface
     input             retrain_req,       // pulse: go to Recovery (e.g. REPLAY_NUM rollover)
@@ -88,8 +111,10 @@ module eerie_ltssm #(
     // GT status outputs arrive late in the clock period: register them first
     reg        pipe_phystatus, pipe_rxelecidle;
     reg [2:0]  pipe_rxstatus;
+    reg [3*NL-1:0] ml_rxst_q;    // per-lane RX status, registered like pipe_rxstatus
     always @(posedge clk) begin
         pipe_phystatus <= i_pipe_phystatus; pipe_rxstatus <= i_pipe_rxstatus; pipe_rxelecidle <= i_pipe_rxelecidle;
+        ml_rxst_q <= ml_rxstatus;
     end
 
     // ---------------- timers ----------------
@@ -123,7 +148,7 @@ module eerie_ltssm #(
                       T_2MS = 16'd2000, T_1MS = 16'd1000;
 
     // registered timeout flags (valid from the second clock after a state change)
-    reg r_to1, r_to2, r_to20, r_to100, r_to1000, r_to12, r_to24, r_to48, r_to2ms, r_tohot;
+    reg r_to1, r_to2, r_to20, r_to100, r_to1000, r_to12, r_to24, r_to48, r_to2ms, r_tohot, r_to24p;
     reg t_clr_d;
     always @(posedge clk) begin
         t_clr_d  <= t_clr;
@@ -134,6 +159,10 @@ module eerie_ltssm #(
         r_to1000 <= !t_clr && t_us >= 16'd1000;
         r_to12   <= !t_clr && t_us >= tmo(T_12MS, 16'd2);
         r_to24   <= !t_clr && t_us >= tmo(T_24MS, 16'd400);
+        // Polling.Active timeout: with fast training short enough that lanes without a partner
+        // (simulation GT models report a receiver on every lane) are dropped before the
+        // partner's Polling.Configuration times out
+        r_to24p  <= !t_clr && t_us >= tmo(T_24MS, 16'd64);
         r_to48   <= !t_clr && t_us >= tmo(T_48MS, 16'd800);
         r_to2ms  <= !t_clr && t_us >= tmo(T_2MS, 16'd200);
         r_tohot  <= !t_clr && t_us >= tmo(T_2MS, 16'd20);
@@ -142,7 +171,7 @@ module eerie_ltssm #(
     wire to1     = r_to1 && to_ok,    to2   = r_to2 && to_ok,   to20 = r_to20 && to_ok;
     wire to100   = r_to100 && to_ok,  to1000 = r_to1000 && to_ok;
     wire to12    = r_to12 && to_ok,   to24  = r_to24 && to_ok,  to48 = r_to48 && to_ok;
-    wire to2ms   = r_to2ms && to_ok,  tohot = r_tohot && to_ok;
+    wire to2ms   = r_to2ms && to_ok,  tohot = r_tohot && to_ok,  to24p = r_to24p && to_ok;
 
     // ---------------- state ----------------
     reg [5:0]  st;
@@ -163,6 +192,26 @@ module eerie_ltssm #(
     reg        hot_from_rx;
     reg        dis_scr_seen;
     reg        spd_tried;        // downstream port: autonomous speed change done for this link up
+    // per-lane bookkeeping
+    reg [NL-1:0]  det_m;          // receiver detected
+    reg [NL-1:0]  act_m;          // lanes that completed Polling
+    reg [NL-1:0]  echo_m;         // lanes taking part in link width negotiation
+    reg [3:0]     lc [0:NL-1];    // per-lane consecutive TS counters
+    reg [7:0]     rxl [0:NL-1];   // last received lane number
+    reg [NL-1:0]  rxl_pad;        // last received lane number was PAD
+    reg [NL-1:0]  m_tsv, m_ts2, m_inv, m_lpad, m_npad, m_link0, m_linkeq;
+    reg [7:0]     m_lane [0:NL-1];
+    reg [3:0]     cfg_w;          // link width being negotiated
+    reg [5:0]     clw_wait;       // TS sent since lane 0 qualified (downstream Linkwidth.Start)
+    integer       li;
+    // widest x1/x2/x4 (<= MAXW) whose lanes 0..W-1 are all set in m
+    function [3:0] f_width; input [NL-1:0] m;
+        begin
+            f_width = 4'd1;
+            if (MAXW >= 2 && NL >= 2 && m[0] && m[1 % NL]) f_width = 4'd2;
+            if (MAXW >= 4 && NL >= 4 && m[0] && m[1 % NL] && m[2 % NL] && m[3 % NL]) f_width = 4'd4;
+        end
+    endfunction
     reg        dsp_hot_q, dsp_dis_q, dsp_tgt_q, dsp_dl_q, dsp_rt_q, rt_taken;
 
     wire [7:0] my_rates = (MAX_RATE >= 2) ? 8'h06 : 8'h02;
@@ -187,6 +236,14 @@ module eerie_ltssm #(
         ts_link_eq <= (i_os_link == link_num);
         ts_lane_eq <= (i_os_lane == lane_num);
         ts_lane_eq_entry <= (i_os_lane == lane_at_entry);
+        for (li = 0; li < NL; li = li + 1) begin
+            m_tsv[li]  <= ml_ts_valid[li] && !rst;
+            m_ts2[li]  <= ml_ts2[li]; m_inv[li] <= ml_ts_inv[li];
+            m_lpad[li] <= ml_link_pad[li]; m_npad[li] <= ml_lane_pad[li];
+            m_link0[li] <= (ml_link[8*li +: 8] == 8'd0);
+            m_linkeq[li] <= (ml_link[8*li +: 8] == link_num);
+            m_lane[li] <= ml_lane[8*li +: 8];
+        end
     end
     wire rx_spd_chg  = os_rate[7];
     wire rx_gen2     = os_rate[2];
@@ -211,6 +268,17 @@ module eerie_ltssm #(
         ts_ge1024 <= ts_tx_cnt >= 11'd1024; ts_ge64 <= ts_tx_cnt >= 11'd64;
     end
     wire cnt_fresh = !t_clr && !t_clr_d;     // counters were cleared on state entry
+    // per-lane conditions
+    reg [NL-1:0] lc_ge1, lc_ge2, pol_ok;
+    always @(*) for (li = 0; li < NL; li = li + 1) begin
+        lc_ge1[li] = (lc[li] >= 4'd1); lc_ge2[li] = (lc[li] >= 4'd2);
+        pol_ok[li] = (li == 0) ? a_ge8 : (lc[li] >= 4'd8);
+    end
+    wire [NL-1:0] LANE0 = 1;
+    wire all_det_ok = &(~det_m | pol_ok);
+    wire echo_ok    = &(~act_m | lc_ge2);
+    wire [NL-1:0] wmask = (cfg_w >= 4'd4) ? {NL{1'b1}} >> (NL > 4 ? NL - 4 : 0) :
+                          (cfg_w >= 4'd2) ? {{NL{1'b0}}, 2'b11} : {{NL{1'b0}}, 1'b1};
     // registered Recovery.RcvrCfg rate decisions (rx_rate_rec only changes on received TS)
     reg  rr_spd, rr_nospd;
     always @(posedge clk) begin
@@ -232,7 +300,7 @@ module eerie_ltssm #(
         eieos_clr <= 1'b0;
         if (rst) begin
             st <= ST_DQUIET; sub <= 3'd0; t_clr <= 1'b1;
-            pipe_txdetectrx <= 1'b0; pipe_powerdown <= 2'b10; pipe_rate <= 1'b0; pipe_rxpolarity <= 1'b0;
+            pipe_txdetectrx <= 1'b0; pipe_powerdown <= 2'b10; pipe_rate <= 1'b0; pipe_rxpolarity <= {NL{1'b0}};
             tx_mode <= M_EIDLE; tx_link <= 8'd0; tx_link_pad <= 1'b1; tx_lane <= 8'd0; tx_lane_pad <= 1'b1;
             tx_rate <= my_rates; tx_ctrl <= 8'd0; scramble_en <= 1'b1;
             link_up <= 1'b0; in_l0 <= 1'b0; ltssm_state <= ST_DQUIET; hot_reset <= 1'b0; link_training <= 1'b0;
@@ -242,6 +310,10 @@ module eerie_ltssm #(
             idle_to_rlock <= 1'b0; rx_ei_seen <= 1'b0; rx_ts2_seen <= 1'b0; cur_gen2 <= 1'b0; t_cyc <= 12'd0;
             rate_target <= 1'b0; hot_from_rx <= 1'b0; dis_scr_seen <= 1'b0; rx_rate_rec <= 8'd0;
             spd_tried <= 1'b0; dsp_retrain_ack <= 1'b0; rt_taken <= 1'b0;
+            det_m <= {NL{1'b0}}; act_m <= {NL{1'b0}}; echo_m <= {NL{1'b0}}; rxl_pad <= {NL{1'b1}};
+            cfg_w <= 4'd1; link_width <= 4'd1; clw_wait <= 6'd0; lane_en <= {NL{1'b0}};
+            tx_lane_v <= {8*NL{1'b0}}; tx_lane_pad_v <= {NL{1'b1}}; tx_link_pad_v <= {NL{1'b1}};
+            for (li = 0; li < NL; li = li + 1) begin lc[li] <= 4'd0; rxl[li] <= 8'd0; end
         end else begin
             dsp_retrain_ack <= 1'b0;
             if (!dsp_rt_q) rt_taken <= 1'b0;
@@ -264,8 +336,11 @@ module eerie_ltssm #(
             ST_DQUIET: begin
                 tx_mode <= M_EIDLE; pipe_powerdown <= 2'b10; pipe_txdetectrx <= 1'b0;
                 link_up <= 1'b0; directed_speed_change <= 1'b0; idle_to_rlock <= 1'b0;
-                changed_speed_recovery <= 1'b0; pipe_rxpolarity <= 1'b0; scramble_en <= 1'b1;
+                changed_speed_recovery <= 1'b0; pipe_rxpolarity <= {NL{1'b0}}; scramble_en <= 1'b1;
+                lane_en <= {NL{1'b0}}; cfg_w <= 4'd1; link_width <= 4'd1;
+                rxl_pad <= {NL{1'b1}}; echo_m <= {NL{1'b0}};
                 tx_link_pad <= 1'b1; tx_lane_pad <= 1'b1; tx_ctrl <= 8'd0; partner_gen2 <= 1'b0;
+                tx_link_pad_v <= {NL{1'b1}}; tx_lane_pad_v <= {NL{1'b1}};
                 spd_tried <= 1'b0;
                 case (sub)
                 3'd0: begin
@@ -287,6 +362,7 @@ module eerie_ltssm #(
                 3'd0: begin pipe_txdetectrx <= 1'b1; sub <= 3'd1; end
                 3'd1: if (pipe_phystatus) begin
                     pipe_txdetectrx <= 1'b0;
+                    for (li = 0; li < NL; li = li + 1) det_m[li] <= (ml_rxst_q[3*li +: 3] == 3'b011);
                     if (pipe_rxstatus == 3'b011) begin
                         goto(ST_PACTIVE);
                     end else goto(ST_DQUIET);
@@ -304,22 +380,30 @@ module eerie_ltssm #(
                 3'd1: if (pipe_phystatus) sub <= 3'd2;
                       else if (to100) sub <= 3'd2;
                 default: begin
-                    tx_mode <= M_TS1;
+                    tx_mode <= M_TS1; lane_en <= det_m;
                     if (os_ts_valid) begin
-                        if (os_ts_inv) pipe_rxpolarity <= ~pipe_rxpolarity;
+                        if (os_ts_inv) pipe_rxpolarity[0] <= ~pipe_rxpolarity[0];
                         if (ts_padpad && (os_ts2 || !os_ctrl[4] || os_ctrl[2]) && !os_ts_inv)
                             cnt_a <= inc4(cnt_a);
                         else cnt_a <= 4'd0;
                     end
-                    if (a_ge8 && cnt_fresh && (FAST_TRAIN ? ts_ge64 : ts_ge1024)) goto(ST_PCONFIG);
-                    else if (to24) begin
-                        if (a_ge8 && cnt_fresh) goto(ST_PCONFIG); else goto(ST_DQUIET);
+                    for (li = 1; li < NL; li = li + 1) if (m_tsv[li]) begin
+                        if (m_inv[li]) pipe_rxpolarity[li] <= ~pipe_rxpolarity[li];
+                        if (m_lpad[li] && m_npad[li] && !m_inv[li]) lc[li] <= inc4(lc[li]); else lc[li] <= 4'd0;
+                    end
+                    lc[0] <= cnt_a;
+                    // all lanes with a receiver have a TS stream, or after the timeout the ones that do
+                    if (a_ge8 && cnt_fresh && (FAST_TRAIN ? ts_ge64 : ts_ge1024) && all_det_ok) begin
+                        act_m <= pol_ok; goto(ST_PCONFIG);
+                    end else if (to24p) begin
+                        if (a_ge8 && cnt_fresh) begin act_m <= pol_ok; goto(ST_PCONFIG); end
+                        else goto(ST_DQUIET);
                     end
                 end
                 endcase
             end
             ST_PCONFIG: begin
-                tx_mode <= M_TS2;
+                tx_mode <= M_TS2; lane_en <= act_m;
                 if (ts2 && ts_padpad) begin cnt_a <= inc4(cnt_a); rx_first <= 1'b1; end
                 else if (os_ts_valid) cnt_a <= 4'd0;
                 if (rx_first && tx_ts_done && tx_after != 6'h3F) tx_after <= tx_after + 1'b1;
@@ -330,12 +414,19 @@ module eerie_ltssm #(
             ST_CLWSTART: if (DSP) begin
                 // downstream: propose link number 0, lanes PAD; wait for the partner to echo it
                 tx_mode <= M_TS1; tx_link <= 8'd0; tx_link_pad <= 1'b0; tx_lane_pad <= 1'b1; tx_rate <= my_rates;
-                link_num <= 8'd0; lane_num <= 8'd0;
+                link_num <= 8'd0; lane_num <= 8'd0; lane_en <= act_m;
+                tx_link_pad_v <= {NL{1'b0}}; tx_lane_pad_v <= {NL{1'b1}};
                 if (ts1 && !os_link_pad && ts_link_eq && os_lane_pad) cnt_a <= inc4(cnt_a);
                 else if (os_ts_valid) cnt_a <= 4'd0;
+                for (li = 1; li < NL; li = li + 1) if (m_tsv[li]) begin
+                    if (!m_ts2[li] && !m_lpad[li] && m_link0[li] && m_npad[li]) lc[li] <= inc4(lc[li]); else lc[li] <= 4'd0;
+                end
+                lc[0] <= cnt_a;
+                if (a_ge2 && tx_ts_done && clw_wait != 6'h3F) clw_wait <= clw_wait + 1'b1;
                 if (dsp_dis_q && ts_ge64) goto(ST_DISABLED);
-                else if (a_ge2 && cnt_fresh) goto(ST_CLWACCEPT);
-                else if (to24) goto(ST_DQUIET);
+                else if (a_ge2 && cnt_fresh && (echo_ok || clw_wait >= 6'd8)) begin
+                    cfg_w <= f_width(act_m & lc_ge2); goto(ST_CLWACCEPT);
+                end else if (to24) goto(ST_DQUIET);
             end else begin
                 tx_mode <= M_TS1; tx_link_pad <= 1'b1; tx_lane_pad <= 1'b1; tx_rate <= my_rates;
                 if (ts1 && !os_link_pad && os_lane_pad) begin
@@ -344,15 +435,24 @@ module eerie_ltssm #(
                     link_num <= os_link;
                 end else if (os_ts_valid) cnt_a <= 4'd0;
                 if (ts1 && os_ctrl[1]) cnt_b <= inc4(cnt_b); else if (os_ts_valid) cnt_b <= 4'd0;
+                lane_en <= act_m;
+                for (li = 1; li < NL; li = li + 1) if (m_tsv[li]) begin
+                    if (!m_ts2[li] && !m_lpad[li] && m_npad[li]) lc[li] <= inc4(lc[li]); else lc[li] <= 4'd0;
+                end
                 if (b_ge2 && cnt_fresh) goto(ST_DISABLED);
                 else if (a_ge2 && cnt_fresh) begin
                     tx_link <= link_num; tx_link_pad <= 1'b0;
+                    echo_m <= act_m & (lc_ge1 | LANE0);
+                    tx_link_pad_v <= ~(act_m & (lc_ge1 | LANE0));
                     goto(ST_CLWACCEPT);
                 end else if (to24) goto(ST_DQUIET);
             end
             ST_CLWACCEPT: if (DSP) begin
                 // downstream: assign lane number 0 to the (only) lane
                 tx_mode <= M_TS1; tx_lane <= 8'd0; tx_lane_pad <= 1'b0; lane_at_entry <= 8'd0;
+                for (li = 0; li < NL; li = li + 1) begin
+                    tx_lane_v[8*li +: 8] <= li; tx_lane_pad_v[li] <= (li >= cfg_w); tx_link_pad_v[li] <= (li >= cfg_w);
+                end
                 goto(ST_CLNWAIT);
             end else begin
                 tx_mode <= M_TS1;
@@ -363,6 +463,13 @@ module eerie_ltssm #(
                 if (ts1 && ts_padpad) cnt_b <= inc4(cnt_b); else if (os_ts_valid) cnt_b <= 4'd0;
                 if (a_ge2 && cnt_fresh) begin
                     tx_lane <= lane_num; tx_lane_pad <= 1'b0; lane_at_entry <= lane_num;
+                    // width: the lanes that received a lane number (contiguous from lane 0, <= MAXW)
+                    cfg_w <= f_width(echo_m & ~rxl_pad);
+                    for (li = 0; li < NL; li = li + 1) begin
+                        tx_lane_v[8*li +: 8] <= (li == 0) ? lane_num : rxl[li];
+                        tx_lane_pad_v[li] <= (li >= f_width(echo_m & ~rxl_pad));
+                        tx_link_pad_v[li] <= (li >= f_width(echo_m & ~rxl_pad));
+                    end
                     goto(ST_CLNWAIT);
                 end else if ((b_ge2 && cnt_fresh) || to2ms) goto(ST_DQUIET);
             end
@@ -386,8 +493,16 @@ module eerie_ltssm #(
                 // downstream: two TS1s whose link and lane numbers match the transmitted ones
                 tx_mode <= M_TS1;
                 if (ts1 && ts_match) cnt_a <= inc4(cnt_a); else if (os_ts_valid) cnt_a <= 4'd0;
-                if (a_ge2 && cnt_fresh) goto(ST_CCOMPLETE);
-                else if (to2ms) goto(ST_DQUIET);
+                if (a_ge2 && cnt_fresh) begin
+                    if (f_width(~rxl_pad) < cfg_w) begin
+                        // the partner answered PAD on some lanes: narrower link, assign again
+                        cfg_w <= f_width(~rxl_pad);
+                        for (li = 0; li < NL; li = li + 1) begin
+                            tx_lane_pad_v[li] <= (li >= f_width(~rxl_pad)); tx_link_pad_v[li] <= (li >= f_width(~rxl_pad));
+                        end
+                        goto(ST_CLNWAIT);
+                    end else goto(ST_CCOMPLETE);
+                end else if (to2ms) goto(ST_DQUIET);
             end else begin
                 tx_mode <= M_TS1;
                 if (ts2 && ts_match) cnt_a <= inc4(cnt_a); else if (os_ts_valid) cnt_a <= 4'd0;
@@ -417,7 +532,7 @@ module eerie_ltssm #(
                 end else if (to2ms) goto(ST_DQUIET);
             end
             ST_CIDLE: begin
-                tx_mode <= M_IDLE; link_up <= 1'b1;
+                tx_mode <= M_IDLE; link_up <= 1'b1; link_width <= cfg_w;
                 if (os_idle2) begin cnt_a <= inc4(cnt_a); rx_first <= 1'b1; end
                 else if (os_ts_valid) cnt_a <= 4'd0;
                 if (rx_first && tx_idle_pair && tx_after != 6'h3F) tx_after <= tx_after + 1'b1;
@@ -593,9 +708,18 @@ module eerie_ltssm #(
             end
             default: goto(ST_DQUIET);
             endcase
+            // Configuration: remember the lane number each lane receives
+            if (st >= ST_CLWSTART && st <= ST_CIDLE)
+                for (li = 0; li < NL; li = li + 1) if (m_tsv[li]) begin
+                    rxl[li] <= m_lane[li]; rxl_pad[li] <= m_npad[li];
+                end
+            // from Lanenum.Wait on only the lanes of the link transmit
+            if ((st >= ST_CLNWAIT && st <= ST_L0) || (st >= ST_RLOCK && st <= ST_DISABLED)) lane_en <= wmask;
             if (t_clr) begin
                 ts_tx_cnt <= 11'd0; tx_after <= 6'd0; rx_first <= 1'b0;
                 cnt_a <= 4'd0; cnt_b <= 4'd0; t_cyc <= 12'd0; rx_ts2_seen <= 1'b0;
+                clw_wait <= 6'd0;
+                for (li = 0; li < NL; li = li + 1) lc[li] <= 4'd0;
             end
         end
     end

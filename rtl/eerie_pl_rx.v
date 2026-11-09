@@ -3,6 +3,10 @@
 //
 //   PIPE RX -> classify -> descrambler -> symbol aligner -> ordered-set / packet parser
 //
+// In a multi-lane link one instance runs per lane: every lane parses its own ordered sets
+// (TS fields, EIOS, SKP) and exports its descrambled symbol stream (ln_*) to the deskew stage;
+// the packet parser of the lane 0 instance is used when the link is x1.
+//
 // * Descrambling happens in arrival order (before alignment) so the LFSR stays
 //   in step with the transmitter regardless of how symbols land on the 16-bit
 //   PIPE word.
@@ -47,7 +51,15 @@ module eerie_pl_rx (
 
     // packet stream to the DLL (pclk domain, into async FIFO)
     output reg        pkt_we,
-    output reg [81:0] pkt_wd
+    output reg [81:0] pkt_wd,
+
+    // descrambled symbol pair, arrival order (to the multi-lane deskew)
+    output            ln_v,
+    output     [15:0] ln_d,
+    output     [1:0]  ln_k,
+    output     [1:0]  ln_com,
+    output     [1:0]  ln_skp,
+    output            ln_err
 );
     `include "eerie_funcs.vh"
 
@@ -136,6 +148,9 @@ module eerie_pl_rx (
         ds_z[0] <= !r_k[0] && ((!raw_0 && descramble_en) ? r_d[7:0] == b_l : r_d[7:0] == 8'h00);
         ds_z[1] <= !r_k[1] && ((!raw_1 && descramble_en) ? r_d[15:8] == sb1 : r_d[15:8] == 8'h00);
     end
+
+    assign ln_v = ds_v; assign ln_d = ds_d; assign ln_k = ds_k; assign ln_err = ds_err;
+    assign ln_com = {ds_c1[9], ds_c0[9]}; assign ln_skp = {ds_c1[8], ds_c0[8]};
 
     // ------------------------------------------------------------------
     // stage 2: aligner -> pairs with start symbols in slot 0, plus pre-decode

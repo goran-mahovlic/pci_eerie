@@ -12,8 +12,8 @@ wrapper, clocking, the TX/RX buffer BRAMs on the MIM ports, and the AXI↔TRN br
 stay as they are.
 
 Scope: endpoint or root port (selected like on `PCIE_2_1`, by `PCIE_CAP_DEVICE_PORT_TYPE`
-0 or 4), x1, 2.5 GT/s and 5.0 GT/s (Gen1/Gen2), 64-bit TRN interface. Gen3 is not planned.
-The structure leaves room for more lanes (see "Extending").
+0 or 4), x1, x2 and x4 links (`LINK_CAP_MAX_LINK_WIDTH` 1, 2, 4; an x8 build trains to x4 so far),
+2.5 GT/s and 5.0 GT/s (Gen1/Gen2), 64-bit TRN interface. Gen3 is not planned.
 
 ## Status
 
@@ -44,6 +44,24 @@ with the `PCIE_2_1` root port for comparison:
 At Gen2 the pci_eerie root port trains at 2.5 GT/s and changes the link to 5.0 GT/s itself, as
 the `PCIE_2_1` root port does; the example root port runs its user clock at 62.5 MHz at both
 rates.
+
+Multi-lane: the endpoint is the Vivado 7-series PCIe core of the root port example, renamed and
+configured as an endpoint (`EP_LANES`, `tb/eerie_tb_ep_ml.v`, `PCIE_2_1` or pci_eerie inside),
+the root port model gets `RP_LANES` lanes. `ml_width_test` checks that both sides report the
+expected link width and speed and moves MWr/MRd of 1..32 DW (every packet length mod 4):
+
+| Link | EP pci_eerie, RP PCIE_2_1 | EP PCIE_2_1, RP pci_eerie | both pci_eerie | both PCIE_2_1 |
+|------|------|------|------|------|
+| x2 Gen1 / Gen2 | pass / pass | | | pass (Gen1) |
+| x4 Gen1 / Gen2 | pass / pass | pass / pass | pass / pass | pass / pass |
+| x4 EP into an x1 / x2 RP | trains x1 / x2, pass | | | x1: pass |
+| x1 / x2 EP into an x4 RP | | trains x1 / x2, pass | | x1: pass |
+| x8 EP build, x8 RP | trains x4, pass | | | |
+
+The x1 tests above run unchanged on the multi-lane RTL. `tb/unit/ml_phy_tb.v` loops the
+multi-lane PHY (striper, per-lane TX/RX, deskew, framing) back without a GT model: 300 random
+TLPs and DLLPs at x2 and x4 with per-lane skew of 0..4 symbols and SKP symbols inserted / removed
+on one lane at every SKP ordered set (elastic buffer), all received intact.
 
 At Gen1, the decoded link traffic of the pio test is identical, TLP for TLP, to the
 `PCIE_2_1` reference run (`sim/ref/`).
@@ -148,6 +166,10 @@ rtl/                 the core: every file listed in rtl/files.f, include directo
   pci_eerie_ports.vh, pci_eerie_params.vh   generated from the unisim model (tools/gen_ports.py)
   eerie_pl_rx.v      PHY RX: descrambler, symbol aligner, OS/TLP/DLLP parser, LCRC/CRC16 check
   eerie_pl_tx.v      PHY TX: TS1/TS2/EIOS/SKP/EIEOS generation, packet serializer, scrambler
+                     (both per lane; the lane 0 packet path serves x1 links)
+  eerie_pl_deskew.v  lane-to-lane deskew (per-lane FIFOs, SKP removal, alignment on COM)
+  eerie_pl_rx_ml.v   x2/x4 receive framing: DW alignment, TLP/DLLP parser, LCRC/CRC16 check
+  eerie_pl_tx_ml.v   x2/x4 transmit striping, logical idle, SKP ordered set scheduling
   eerie_ltssm.v      LTSSM (upstream port): Detect..L0, Recovery incl. speed change, hot reset
   eerie_dll.v        data link layer: DL/FC init, Ack/Nak, replay, TX queue in the MIM TX BRAM
   eerie_tl_rx.v      transaction RX: RX buffer in the MIM RX BRAM, BAR decode, cfg/UR/msg handling
@@ -157,7 +179,9 @@ rtl/                 the core: every file listed in rtl/files.f, include directo
   eerie_funcs.vh     scrambler / CRC functions
 integration/pcie_block.v   pcie_7x's pcie_block with PCIE_2_1 replaced by pci_eerie
 tb/                  testbench additions: board, PIPE/TLP monitors, error injection, extra tests,
-                     a memory test application (eerie_tb_ep.v)
+                     the memory test application (eerie_tb_app.v) on pcie_7x (eerie_tb_ep.v, x1)
+                     or on the Vivado core (eerie_tb_ep_ml.v, x1..x8)
+tb/unit/             multi-lane PHY loopback unit test (run_ml_phy.sh)
 sim/run.sh           xsim runner (Vivado 2023.2); sim/regress.sh runs several in parallel
 sim/ref/             decoded reference traces / config dumps of the PCIE_2_1 runs (endpoint and
                      root port: rp_cfg_dump_hard.txt)
@@ -178,8 +202,11 @@ else is CERN-OHL-P v2 (see LICENSE) unless the file says otherwise.
 1. Add `rtl/*.v` (the list in `rtl/files.f`) to the project and put `rtl/` on the include path.
 2. In the file that instantiates `PCIE_2_1`, rename the instance's module to `pci_eerie`.
    `integration/pcie_block.v` is `pcie_7x/src/pcie_block.v` with only that change.
-3. Keep `USERCLK2 = USERCLK`, 64-bit TRN (the pcie_7x settings: 62.5 MHz user clock at Gen1,
-   125 MHz at Gen2; a 62.5 MHz user clock at Gen2 also works, as in the root port example).
+3. Keep `USERCLK2 = USERCLK`, 64-bit TRN, with a user clock fast enough for the link: 8 bytes
+   per clock carry 62.5 MHz for x1 Gen1, 125 MHz up to x2 Gen2 / x4 Gen1, 250 MHz for x4 Gen2
+   (the pcie_7x x1 settings are 62.5 MHz at Gen1 and 125 MHz at Gen2; a slower clock at the same
+   rate works while the traffic allows, as the example root port's 62.5 MHz at x1 Gen2).
+   Lanes: `LINK_CAP_MAX_LINK_WIDTH`; the GT wrapper must provide that many PIPE lanes.
 4. Root port: instantiate it with the root port parameters (`PCIE_CAP_DEVICE_PORT_TYPE = 4`,
    `HEADER_TYPE = 01h`, as Vivado's root port configuration of the core does). The type-1
    header, the root port registers and the downstream link behaviour follow from those; the
@@ -203,6 +230,11 @@ APP=1  sim/run.sh eerie eerie_mem_test      # endpoint with the testbench memory
 RP=eerie sim/run.sh baseline ...            # pci_eerie as the root port, PCIE_2_1 endpoint
 RP=eerie sim/run.sh eerie ...               # pci_eerie on both sides
 sim/run.sh baseline rp_cfg_dump             # root port's own config space (diff vs sim/ref)
+EP_LANES=4 sim/run.sh eerie ml_width_test   # x4 (Vivado core endpoint, x4 root port model)
+EP_LANES=4 RP_LANES=1 sim/run.sh eerie ml_width_test   # x4 endpoint in an x1 slot
+sim/regress.sh ml                           # multi-lane matrix (12 runs)
+tb/unit/run_ml_phy.sh 4 00010302            # PHY loopback, x4, lane skews 2,3,1,0 symbols
+PLUSARGS="-testplusarg elastic" tb/unit/run_ml_phy.sh 2   # with SKP insertion / removal
 sim/run.sh eerie eerie_stress_test -testplusarg inject_rx_tlp=12 -testplusarg inject_tx_tlp=9
 python3 tools/pipe_decode.py sim/build_eerie/pipe.log | less
 sim/regress.sh                              # full regression (the 9 runs in the Status table)
@@ -283,7 +315,14 @@ BAR0/BAR1), configuration requests from the link answered with UR, received mess
 onto `CFGMSGRECEIVED*` (INTx, ERR_*, PM_PME, PME_TO_Ack, PM_Active_State_Nak) and not
 forwarded, the same as `PCIE_2_1` with `ENABLE_MSG_ROUTE = 0`.
 
-Not supported yet: more than one lane; initiating L0s/L1/L2 (the core never enters ASPM or
+Multi-lane (x2, x4): per-lane receiver detection, polarity and ordered sets, link width
+negotiation as upstream and downstream port (the lanes that keep up in Polling and echo the link
+number; partner lanes beyond the width get PAD lane numbers), down-training to x2 / x1, lane
+deskew (SKP removal per lane, alignment on COM), x2/x4 framing and striping, lanes outside the
+link in electrical idle.
+
+Not supported yet: lane reversal; x8 (an x8 build trains to x4: x8 Gen2 needs 16 bytes per
+clock, a 128-bit DLL / TL / TRN); initiating L0s/L1/L2 (the core never enters ASPM or
 PM L1 itself; its receiver tolerates the link partner's L0s); AER/ECRC; ERR_* error
 messages; VC/RBAR/VSEC capabilities; USERCLK2 ≠ USERCLK; 128-bit TRN; `rx_np_ok`
 throttling (non-posted requests are not held back); the DLLP and `PL2*`/`LL2*`/`TL2*` side
@@ -309,10 +348,10 @@ Found while bringing the core up with `pcie_7x`:
 
 ## Extending
 
-* **More lanes.** `eerie_pl_rx`/`eerie_pl_tx` are per-lane. A xN link needs one instance of
-  each per lane, a lane-deskew stage, an LTSSM that tracks TS reception per lane and assigns
-  lane numbers, and a wider packet path towards the DLL (the DLL and TL already work on
-  64-bit beats; x4 Gen2 needs 128 bits at 250 MHz or 64 bits at 500 MB/s per 125 MHz beat).
+* **x8.** The PHY parts are written for N lanes (deskew, LTSSM); x8 needs framing / striping
+  of 16 symbols per clock and, for x8 Gen2 (4 GB/s), a 128-bit DLL / TL / TRN path (PCIE_2_1
+  uses 128 bits at 250 MHz there), which also lets x4 Gen2 run at a 125 MHz user clock. The
+  RX/TX buffers would move from the 64-bit MIM ports to internal 128-bit RAMs.
 * **Root port.** Implemented (see above); the DLL is shared unchanged, the port role changes
   the LTSSM's Configuration and Recovery/Hot Reset/Disabled branches, the configuration space
   layout and the TL RX routing (`DSP` parameters of `eerie_ltssm` / `eerie_tl_rx`).

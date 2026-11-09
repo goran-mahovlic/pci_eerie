@@ -69,6 +69,13 @@
 `ifndef EP_GEN2
 `define EP_GEN2 0
 `endif
+// lane counts (EP_ML: multi-lane endpoint eerie_tb_ep_ml; otherwise the x1 pcie_7x endpoint)
+`ifndef EP_LANES
+`define EP_LANES 1
+`endif
+`ifndef RP_LANES
+`define RP_LANES 1
+`endif
 
 module board;
 
@@ -95,10 +102,30 @@ localparam EXT_PIPE_SIM = "FALSE";
 // PCI-Express Serial Interconnect
 //
 
-wire  [0:0]  ep_pci_exp_txn;
-wire  [0:0]  ep_pci_exp_txp;
-wire  [0:0]  rp_pci_exp_txn;
-wire  [0:0]  rp_pci_exp_txp;
+wire  [`EP_LANES-1:0]  ep_pci_exp_txn;
+wire  [`EP_LANES-1:0]  ep_pci_exp_txp;
+wire  [`RP_LANES-1:0]  rp_pci_exp_txn;
+wire  [`RP_LANES-1:0]  rp_pci_exp_txp;
+// lanes are connected up to the narrower side; the other receivers see no signal
+wire  [`EP_LANES-1:0]  ep_pci_exp_rxn, ep_pci_exp_rxp;
+wire  [`RP_LANES-1:0]  rp_pci_exp_rxn, rp_pci_exp_rxp;
+genvar gl;
+generate
+  for (gl = 0; gl < `EP_LANES; gl = gl + 1) begin : ep_rx_l
+    if (gl < `RP_LANES) begin
+      assign ep_pci_exp_rxn[gl] = rp_pci_exp_txn[gl]; assign ep_pci_exp_rxp[gl] = rp_pci_exp_txp[gl];
+    end else begin
+      assign ep_pci_exp_rxn[gl] = 1'b0; assign ep_pci_exp_rxp[gl] = 1'b0;
+    end
+  end
+  for (gl = 0; gl < `RP_LANES; gl = gl + 1) begin : rp_rx_l
+    if (gl < `EP_LANES) begin
+      assign rp_pci_exp_rxn[gl] = ep_pci_exp_txn[gl]; assign rp_pci_exp_rxp[gl] = ep_pci_exp_txp[gl];
+    end else begin
+      assign rp_pci_exp_rxn[gl] = 1'b0; assign rp_pci_exp_rxp[gl] = 1'b0;
+    end
+  end
+endgenerate
 //
 // PCI-Express Endpoint Instance
 //
@@ -116,7 +143,12 @@ wire  [0:0]  rp_pci_exp_txp;
 //  .pci_exp_rxp(rp_pci_exp_txp)
 //);
 
-`ifdef EERIE_APP
+`ifdef EP_ML
+eerie_tb_ep_ml #(
+  .LANES(`EP_LANES),
+  .ENABLE_GEN2(`EP_GEN2)
+) EP (
+`elsif EERIE_APP
 eerie_tb_ep #(
   .GT_DEVICE(`EP_GT_DEVICE),
   .ENABLE_GEN2(`EP_GEN2)
@@ -136,16 +168,42 @@ pcie_7x_top_aximm #(
   .pci_exp_txn(ep_pci_exp_txn),
   .pci_exp_txp(ep_pci_exp_txp),
   
-  .pci_exp_rxn(rp_pci_exp_txn),
-  .pci_exp_rxp(rp_pci_exp_txp)
+  .pci_exp_rxn(ep_pci_exp_rxn),
+  .pci_exp_rxp(ep_pci_exp_rxp)
 );
 
 //
 // PCI-Express Model Root Port Instance
 //
 
-xilinx_pcie_2_1_rport_7x # (
 `ifdef RP_GEN2
+localparam RP_SPD = 2;
+`else
+localparam RP_SPD = 1;
+`endif
+// root port user clock for a 64-bit interface (as eerie_tb_ep_ml)
+localparam RP_UCF = (`RP_LANES * RP_SPD <= 1) ? 1 : (`RP_LANES * RP_SPD <= 4) ? 2 : 3;
+
+xilinx_pcie_2_1_rport_7x # (
+`ifdef EP_ML
+  .REF_CLK_FREQ(0),
+  .PL_FAST_TRAIN("TRUE"),
+  .ALLOW_X8_GEN2("FALSE"),
+  .C_DATA_WIDTH(64),
+  .LINK_CAP_MAX_LINK_WIDTH(`RP_LANES),
+  .DEVICE_ID(16'h7100),
+  .LINK_CAP_MAX_LINK_SPEED(RP_SPD),
+  .LINK_CTRL2_TARGET_LINK_SPEED(RP_SPD),
+  .DEV_CAP_MAX_PAYLOAD_SUPPORTED(2),
+  .TRN_DW("FALSE"),
+  .VC0_TX_LASTPACKET(14),
+  .VC0_RX_RAM_LIMIT(13'h3FF),
+  .VC0_CPL_INFINITE("TRUE"),
+  .VC0_TOTAL_CREDITS_PD(181),
+  .VC0_TOTAL_CREDITS_CD(205),
+  .USER_CLK_FREQ(RP_UCF),
+  .USER_CLK2_DIV2("FALSE")
+`elsif RP_GEN2
   .REF_CLK_FREQ(0),
   .PL_FAST_TRAIN("TRUE"),
   .ALLOW_X8_GEN2("FALSE"),
@@ -192,8 +250,8 @@ RP (
   // PCI-Express Interface
   .pci_exp_txn(rp_pci_exp_txn),
   .pci_exp_txp(rp_pci_exp_txp),
-  .pci_exp_rxn(ep_pci_exp_txn),
-  .pci_exp_rxp(ep_pci_exp_txp)
+  .pci_exp_rxn(rp_pci_exp_rxn),
+  .pci_exp_rxp(rp_pci_exp_rxp)
 );
 
 

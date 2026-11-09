@@ -7,6 +7,11 @@
 // SKP ordered sets.  Everything leaves aligned to the 16-bit PIPE word:
 // ordered sets and packets always start in byte 0.
 //
+// In a multi-lane link one instance runs per lane: ordered sets come from the instance itself
+// (per-lane lane numbers), while in data / logical idle mode the striper (eerie_pl_tx_ml)
+// supplies the lane's symbol pairs, including SKP ordered sets (ext_*); the instance scrambles
+// them. The lane 0 instance frames packets itself when the link is x1.
+//
 // Pipeline (for 250 MHz at 5 GT/s):
 //   FIFO -> 2-entry beat prefetch -> symbol select (reg) -> scrambler (reg) -> PIPE
 `timescale 1ns / 1ps
@@ -32,6 +37,13 @@ module eerie_pl_tx #(
     output reg        eios_done,       // pulse: one EIOS completely sent
     output reg        idle_pair,       // pulse: two logical idle symbols sent
     output reg        busy,            // OS/packet in progress (mode change pending)
+
+    // external symbols (multi-lane data / logical idle)
+    input             ext_en,          // this lane is driven by the striper in data / idle mode
+    input             ext_busy,        // striper still sending a packet / SKP OS (mode may have changed)
+    input      [7:0]  ext_s0, ext_s1,
+    input             ext_k0, ext_k1,
+    input             ext_idle,        // this pair is logical idle
 
     // framed packets (FWFT FIFO, whole packets only)
     input      [66:0] pkt_rd_data,     // {half,last,sop,data[63:0]}
@@ -94,6 +106,8 @@ module eerie_pl_tx #(
     reg [2:0] n_st; reg [2:0] n_idx; reg n_ts2;
     reg       n_ts_done, n_eios_done, n_idle_pair, n_consume, take_skp, n_eieos_start;
     wire      is_ts_mode = (mode == M_TS1 || mode == M_TS2);
+    wire      ext_act = ext_en && st == S_IDLE && mode != M_EIDLE &&
+                        (ext_busy || mode == M_DATA || mode == M_IDLE);
 
     task ts_pair;
         input [2:0] i;
@@ -152,6 +166,9 @@ module eerie_pl_tx #(
         default: begin // S_IDLE: choose what to start this cycle
             if (mode == M_EIDLE) begin
                 eidle = 1'b1;
+            end else if (ext_act) begin
+                s0 = ext_s0; s1 = ext_s1; k0 = ext_k0; k1 = ext_k1;
+                n_idle_pair = ext_idle;
             end else if (skp_pend != 0) begin
                 take_skp = 1'b1;
                 s0 = K_COM; s1 = K_SKP; k0 = 1'b1; k1 = 1'b1;
@@ -208,7 +225,8 @@ module eerie_pl_tx #(
             q_skp0 <= k0 && s0 == K_SKP;
             q_skp1 <= k1 && s1 == K_SKP;
             q_eidle <= eidle;
-            if (eidle) begin
+            if (eidle || ext_act) begin
+                // (the striper schedules SKP ordered sets while it drives the lane)
                 skp_cnt <= 11'd0; skp_pend <= 3'd0;
             end else if (skp_cnt >= SKP_INTERVAL / 2 - 1) begin
                 skp_cnt <= 11'd0;

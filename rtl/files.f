@@ -1,7 +1,10 @@
 eerie_sync.v
 eerie_async_fifo.v
 eerie_pl_rx.v
+eerie_pl_rx_ml.v
+eerie_pl_deskew.v
 eerie_pl_tx.v
+eerie_pl_tx_ml.v
 eerie_ltssm.v
 eerie_dll.v
 eerie_cfg.v
