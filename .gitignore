@@ -10,3 +10,4 @@ syn/*.jou
 __pycache__/
 *.pyc
 abc.history
+tb/unit/build_*/
