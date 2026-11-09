@@ -6,8 +6,8 @@
 // interface towards the GT wrapper, TRN interface towards the user, and the
 // MIM ports used for the external TX (replay/queue) and RX buffer BRAMs.
 //
-// Scope: endpoint (UPSTREAM_FACING), x1, 2.5 / 5.0 GT/s, 64-bit TRN,
-// USERCLK2 == USERCLK.  See doc/README.md for the list of supported features.
+// Scope: endpoint or root port (PCIE_CAP_DEVICE_PORT_TYPE 0 / 4), x1, 2.5 / 5.0 GT/s,
+// 64-bit TRN, USERCLK2 == USERCLK.  See README.md for the list of supported features.
 `timescale 1ns / 1ps
 module pci_eerie #(
 `include "pci_eerie_params.vh"
@@ -18,6 +18,7 @@ module pci_eerie #(
     // derived configuration
     // ------------------------------------------------------------------
     localparam MAX_RATE  = (LINK_CAP_MAX_LINK_SPEED >= 4'h2) ? 2 : 1;
+    localparam DSP       = (PCIE_CAP_DEVICE_PORT_TYPE == 4'h4);   // root port (downstream port)
     localparam FAST      = (PL_FAST_TRAIN == "TRUE");
     localparam CPL_INF   = (VC0_CPL_INFINITE == "TRUE");
     localparam MPS_BYTES = 128 << DEV_CAP_MAX_PAYLOAD_SUPPORTED;
@@ -30,8 +31,8 @@ module pci_eerie #(
     localparam TXB_RLAT  = TL_TX_RAM_RDATA_LATENCY;
     localparam RXB_RLAT  = TL_RX_RAM_RDATA_LATENCY;
     localparam MAX_UNACK = (VC0_TX_LASTPACKET + 1 > 31) ? 31 : VC0_TX_LASTPACKET + 1;
-    // replay timer in user clocks; 4 symbol times per user clock at the
-    // supported USERCLK settings (62.5 MHz @ 2.5 GT/s, 125 MHz @ 5 GT/s)
+    // replay timer in user clocks, for 4 symbol times per user clock (62.5 MHz @ 2.5 GT/s,
+    // 125 MHz @ 5 GT/s); with a 62.5 MHz user clock at 5 GT/s it is twice as long
     localparam [15:0] REPLAY_T = (LL_REPLAY_TIMEOUT_EN == "TRUE") ? LL_REPLAY_TIMEOUT[14:2] + 16'd64 :
                                  (MPS_BYTES <= 128) ? 16'd400 : (MPS_BYTES <= 256) ? 16'd500 :
                                  (MPS_BYTES <= 512) ? 16'd700 : 16'd1200;
@@ -74,6 +75,8 @@ module pci_eerie #(
     wire [9:0]  s_mg_addr   = xz0(CFGMGMTDWADDR);
     wire [31:0] s_mg_di     = xz0(CFGMGMTDI);
     wire        s_tcfg_gnt  = xz0(TRNTCFGGNT);
+    wire [15:0] s_ds_id     = xz0({CFGDSBUSNUMBER, CFGDSDEVICENUMBER, CFGDSFUNCTIONNUMBER});
+    wire        s_tx_hotrst = xz0(PLTRANSMITHOTRST);
 
     // ------------------------------------------------------------------
     // resets
@@ -116,6 +119,8 @@ module pci_eerie #(
     wire [5:0]  p_ltssm;
     wire [7:0]  p_link_num;
     wire        p_rate;
+    // root port: link controls from the configuration space (user clock), synchronized below
+    wire        p_dsp_retrain, p_dsp_hot, p_dsp_dis, p_dsp_tgt2, p_dl_up, p_retrain_ack;
 
     eerie_pl_tx pl_tx (
         .clk(pclk), .rst(p_rst),
@@ -129,7 +134,7 @@ module pci_eerie #(
 
     eerie_ltssm #(
         .MAX_RATE(MAX_RATE), .FAST_TRAIN(FAST), .N_FTS_GEN1(N_FTS_GEN1), .N_FTS_GEN2(N_FTS_GEN2),
-        .UPCONFIG(UPCONFIG_CAPABLE == "TRUE")
+        .UPCONFIG(UPCONFIG_CAPABLE == "TRUE"), .DSP(DSP)
     ) ltssm (
         .clk(pclk), .rst(p_rst),
         .pipe_txdetectrx(PIPETXRCVRDET), .pipe_powerdown(PIPETX0POWERDOWN), .pipe_rate(p_rate),
@@ -143,6 +148,8 @@ module pci_eerie #(
         .i_os_link_pad(os_link_pad), .i_os_lane(os_lane), .i_os_lane_pad(os_lane_pad), .i_os_nfts(os_nfts),
         .i_os_rate(os_rate), .i_os_ctrl(os_ctrl), .i_os_eios(os_eios), .i_os_idle2(os_idle2),
         .retrain_req(retrain_p),
+        .dsp_retrain(p_dsp_retrain), .dsp_hot_reset(p_dsp_hot), .dsp_disable(p_dsp_dis),
+        .dsp_target_gen2(p_dsp_tgt2), .dsp_dl_up(p_dl_up), .dsp_retrain_ack(p_retrain_ack),
         .link_up(p_link_up), .in_l0(p_in_l0), .ltssm_state(p_ltssm), .hot_reset(p_hot_reset),
         .link_training(p_link_training), .partner_gen2(p_partner_gen2), .link_num(p_link_num),
         .rcvr_err_ltssm()
@@ -187,6 +194,13 @@ module pci_eerie #(
     eerie_sync_bits #(.W(1), .INIT(1'b1)) sync_lrst (.clk(pclk), .d(u_lrst), .q(p_lrst));
     wire u_retrain;
     eerie_sync_pulse sync_retrain (.src_clk(uclk), .src_pulse(u_retrain), .dst_clk(pclk), .dst_pulse(retrain_p));
+    wire [15:0] c_lnkctl, c_lnkctl2, c_brctl;
+    wire        dl_up;
+    eerie_sync_bits #(.W(5)) sync_dsp (.clk(pclk),
+        .d({c_lnkctl[5], c_brctl[6] || s_tx_hotrst, c_lnkctl[4], c_lnkctl2[3:0] >= 4'd2, dl_up}),
+        .q({p_dsp_retrain, p_dsp_hot, p_dsp_dis, p_dsp_tgt2, p_dl_up}));
+    wire u_retrain_ack;
+    eerie_sync_pulse sync_rt_ack (.src_clk(pclk), .src_pulse(p_retrain_ack), .dst_clk(uclk), .dst_pulse(u_retrain_ack));
 
     wire [81:0] plrx_rd_d;
     wire        plrx_rd_empty, plrx_rd;
@@ -208,7 +222,7 @@ module pci_eerie #(
     // data link layer (user clock domain)
     // ------------------------------------------------------------------
     wire        c_pme_en, c_pme_sts, c_msi_en, c_msix_en, c_msix_fm, flr_pulse;
-    wire        dl_up, dl_init;
+    wire        dl_init;
     wire        tlrx_v, tlrx_sop, tlrx_half, tlrx_end, tlrx_ok;
     wire [63:0] tlrx_d;
     wire        txq_v, txq_sop, txq_eop, txq_half, txq_abort;
@@ -274,7 +288,8 @@ module pci_eerie #(
     // ------------------------------------------------------------------
     // transaction layer + configuration space
     // ------------------------------------------------------------------
-    wire [15:0] c_command, c_status, c_devctl, c_devsts, c_lnkctl, c_lnksts, c_devctl2, c_lnkctl2;
+    wire [15:0] c_command, c_status, c_devctl, c_devsts, c_lnksts, c_devctl2;
+    wire [7:0]  c_rootctl;
     wire [1:0]  c_pm_state;
     wire [2:0]  c_msi_mme;
     wire [63:0] c_msi_addr;
@@ -313,6 +328,7 @@ module pci_eerie #(
     wire [4:0]  dev_num;
     wire        msg_received, msg_pme_to, msg_unlock, msg_setslot;
     wire [15:0] msg_data;
+    wire [7:0]  msg_code;
     wire [9:0]  msg_slot_pwr;
     wire        e_ur, e_ur_np, e_malformed, e_overflow, e_poisoned;
     wire        intx_state;
@@ -324,7 +340,10 @@ module pci_eerie #(
         .PM_CAP_ON(PM_CAP_ON), .PM_BASE_PTR(PM_BASE_PTR), .PM_CAP_NEXTPTR(PM_CAP_NEXTPTR), .PM_CAP_VERSION(PM_CAP_VERSION),
         .PM_CAP_PME_CLOCK(PM_CAP_PME_CLOCK), .PM_CAP_DSI(PM_CAP_DSI), .PM_CAP_AUXCURRENT(PM_CAP_AUXCURRENT),
         .PM_CAP_D1SUPPORT(PM_CAP_D1SUPPORT), .PM_CAP_D2SUPPORT(PM_CAP_D2SUPPORT), .PM_CAP_PMESUPPORT(PM_CAP_PMESUPPORT),
-        .PM_CSR_NOSOFTRST(PM_CSR_NOSOFTRST),
+        .PM_CSR_NOSOFTRST(PM_CSR_NOSOFTRST), .PM_CSR_B2B3(PM_CSR_B2B3), .PM_CSR_BPCCEN(PM_CSR_BPCCEN),
+        .PM_DATA({PM_DATA7, PM_DATA6, PM_DATA5, PM_DATA4, PM_DATA3, PM_DATA2, PM_DATA1, PM_DATA0}),
+        .PM_DATA_SCALE({PM_DATA_SCALE7, PM_DATA_SCALE6, PM_DATA_SCALE5, PM_DATA_SCALE4,
+                        PM_DATA_SCALE3, PM_DATA_SCALE2, PM_DATA_SCALE1, PM_DATA_SCALE0}),
         .MSI_CAP_ON(MSI_CAP_ON), .MSI_BASE_PTR(MSI_BASE_PTR), .MSI_CAP_NEXTPTR(MSI_CAP_NEXTPTR),
         .MSI_CAP_MULTIMSGCAP(MSI_CAP_MULTIMSGCAP), .MSI_CAP_64_BIT_ADDR_CAPABLE(MSI_CAP_64_BIT_ADDR_CAPABLE),
         .MSI_CAP_PER_VECTOR_MASKING_CAPABLE(MSI_CAP_PER_VECTOR_MASKING_CAPABLE),
@@ -334,7 +353,7 @@ module pci_eerie #(
         .MSIX_CAP_PBA_OFFSET(MSIX_CAP_PBA_OFFSET),
         .PCIE_BASE_PTR(PCIE_BASE_PTR), .PCIE_CAP_NEXTPTR(PCIE_CAP_NEXTPTR),
         .PCIE_CAP_CAPABILITY_VERSION(PCIE_CAP_CAPABILITY_VERSION), .PCIE_CAP_DEVICE_PORT_TYPE(PCIE_CAP_DEVICE_PORT_TYPE),
-        .PCIE_CAP_SLOT_IMPLEMENTED(PCIE_CAP_SLOT_IMPLEMENTED),
+        .PCIE_CAP_SLOT_IMPLEMENTED(PCIE_CAP_SLOT_IMPLEMENTED), .ROOT_CAP_CRS_SW_VISIBILITY(ROOT_CAP_CRS_SW_VISIBILITY),
         .DEV_CAP_MAX_PAYLOAD_SUPPORTED(DEV_CAP_MAX_PAYLOAD_SUPPORTED),
         .DEV_CAP_PHANTOM_FUNCTIONS_SUPPORT(DEV_CAP_PHANTOM_FUNCTIONS_SUPPORT),
         .DEV_CAP_EXT_TAG_SUPPORTED(DEV_CAP_EXT_TAG_SUPPORTED),
@@ -361,7 +380,8 @@ module pci_eerie #(
         .CPL_TIMEOUT_DISABLE_SUPPORTED(CPL_TIMEOUT_DISABLE_SUPPORTED),
         .DSN_CAP_ON(DSN_CAP_ON), .DSN_BASE_PTR(DSN_BASE_PTR), .DSN_CAP_NEXTPTR(DSN_CAP_NEXTPTR)
     ) cfg (
-        .clk(uclk), .rst(u_lrst),
+        // a root port keeps its configuration across link down; an endpoint's is reset by it
+        .clk(uclk), .rst(DSP ? u_rst : u_lrst),
         .req_v(tl_cfg_v || mg_req), .req_wr(tl_cfg_v ? tl_cfg_wr : !s_mg_wr_n),
         .req_dwaddr(tl_cfg_v ? tl_cfg_a : s_mg_addr), .req_be(tl_cfg_v ? tl_cfg_be : ~s_mg_be_n),
         .req_wdata(tl_cfg_v ? tl_cfg_wd : s_mg_di),
@@ -376,11 +396,14 @@ module pci_eerie #(
         .set_sig_target_abort(!s_err_abort_n), .set_rcv_master_abort(1'b0), .set_sig_sys_error(1'b0),
         .set_detected_parity(e_poisoned), .set_master_data_parity(1'b0), .set_rcv_target_abort(1'b0),
         .set_pme_status(1'b0), .slot_pwr_v(msg_setslot), .slot_pwr(msg_slot_pwr),
+        .set_pme_req(DSP && msg_received && msg_code == 8'h18), .pme_req_id(msg_data),
+        .lnk_retrain_clr(u_retrain_ack),
         .command(c_command), .status(c_status), .dev_control(c_devctl), .dev_status(c_devsts),
         .link_control(c_lnkctl), .link_status(c_lnksts), .dev_control2(c_devctl2), .link_control2(c_lnkctl2),
         .pm_power_state(c_pm_state), .pm_pme_en(c_pme_en), .pm_pme_status(c_pme_sts),
         .msi_enable(c_msi_en), .msi_mme(c_msi_mme), .msi_addr(c_msi_addr), .msi_data(c_msi_data),
         .msix_enable(c_msix_en), .msix_fmask(c_msix_fm), .int_line(c_int_line), .flr_pulse(flr_pulse),
+        .bridge_control(c_brctl), .root_control(c_rootctl),
         .bar0(c_bar0), .bar1(c_bar1), .bar2(c_bar2), .bar3(c_bar3), .bar4(c_bar4), .bar5(c_bar5),
         .rom_bar(c_rom), .rom_en(c_rom_en)
     );
@@ -390,7 +413,7 @@ module pci_eerie #(
         .BAR0(BAR0), .BAR1(BAR1), .BAR2(BAR2), .BAR3(BAR3), .BAR4(BAR4), .BAR5(BAR5), .EXPANSION_ROM(EXPANSION_ROM),
         .INIT_PH(VC0_TOTAL_CREDITS_PH), .INIT_PD(VC0_TOTAL_CREDITS_PD),
         .INIT_NPH(VC0_TOTAL_CREDITS_NPH), .INIT_NPD(VC0_TOTAL_CREDITS_NPD),
-        .INIT_CPLH(VC0_TOTAL_CREDITS_CH), .INIT_CPLD(VC0_TOTAL_CREDITS_CD), .CPL_INFINITE(CPL_INF)
+        .INIT_CPLH(VC0_TOTAL_CREDITS_CH), .INIT_CPLD(VC0_TOTAL_CREDITS_CD), .CPL_INFINITE(CPL_INF), .DSP(DSP)
     ) tl_rx (
         .clk(uclk), .rst(u_lrst),
         .tlrx_v(tlrx_v), .tlrx_d(tlrx_d), .tlrx_sop(tlrx_sop), .tlrx_half(tlrx_half), .tlrx_end(tlrx_end), .tlrx_ok(tlrx_ok),
@@ -405,7 +428,7 @@ module pci_eerie #(
         .icpl_v(icpl_v), .icpl_status(icpl_status), .icpl_hasd(icpl_hasd), .icpl_data(icpl_data),
         .icpl_reqid(icpl_reqid), .icpl_tag(icpl_tag), .icpl_tc(icpl_tc), .icpl_attr(icpl_attr),
         .icpl_laddr(icpl_laddr), .icpl_bcnt(icpl_bcnt), .icpl_ack(icpl_ack),
-        .msg_received(msg_received), .msg_data(msg_data), .msg_pme_to(msg_pme_to), .msg_unlock(msg_unlock),
+        .msg_received(msg_received), .msg_data(msg_data), .msg_code(msg_code), .msg_pme_to(msg_pme_to), .msg_unlock(msg_unlock),
         .msg_setslot(msg_setslot), .msg_slot_pwr(msg_slot_pwr),
         .err_ur(e_ur), .err_ur_np(e_ur_np), .err_malformed(e_malformed), .err_overflow(e_overflow), .err_poisoned(e_poisoned),
         .fc_ph(fc_ph), .fc_pd(fc_pd), .fc_nph(fc_nph), .fc_npd(fc_npd), .fc_cplh(fc_cplh), .fc_cpld(fc_cpld),
@@ -439,7 +462,7 @@ module pci_eerie #(
         .trn_tcfg_gnt(s_tcfg_gnt),
         .txq_v(txq_v), .txq_d(txq_d), .txq_sop(txq_sop), .txq_eop(txq_eop), .txq_half(txq_half), .txq_abort(txq_abort),
         .txq_slots(txq_slots),
-        .req_id({bus_num, dev_num, 3'b000}), .command(c_command),
+        .req_id(DSP ? s_ds_id : {bus_num, dev_num, 3'b000}), .command(c_command),
         .msi_enable(c_msi_en), .msi_mme(c_msi_mme), .msi_addr(c_msi_addr), .msi_data(c_msi_data),
         .icpl_v(icpl_v), .icpl_status(icpl_status), .icpl_hasd(icpl_hasd), .icpl_data(icpl_data),
         .icpl_reqid(icpl_reqid), .icpl_tag(icpl_tag), .icpl_tc(icpl_tc), .icpl_attr(icpl_attr),
@@ -459,7 +482,7 @@ module pci_eerie #(
     assign CFGCOMMANDBUSMASTERENABLE = c_command[2];
     assign CFGCOMMANDSERREN          = c_command[8];
     assign CFGCOMMANDINTERRUPTDISABLE = c_command[10];
-    assign CFGBRIDGESERREN           = 1'b0;
+    assign CFGBRIDGESERREN           = c_brctl[1];
     assign CFGDEVCONTROLCORRERRREPORTINGEN  = c_devctl[0];
     assign CFGDEVCONTROLNONFATALREPORTINGEN = c_devctl[1];
     assign CFGDEVCONTROLFATALERRREPORTINGEN = c_devctl[2];
@@ -520,13 +543,22 @@ module pci_eerie #(
     assign CFGMSGRECEIVEDPMETO = msg_pme_to;
     assign CFGMSGRECEIVEDUNLOCK = msg_unlock;
     assign CFGMSGRECEIVEDSETSLOTPOWERLIMIT = msg_setslot;
-    assign CFGMSGRECEIVEDASSERTINTA = 1'b0;   assign CFGMSGRECEIVEDDEASSERTINTA = 1'b0;
-    assign CFGMSGRECEIVEDASSERTINTB = 1'b0;   assign CFGMSGRECEIVEDDEASSERTINTB = 1'b0;
-    assign CFGMSGRECEIVEDASSERTINTC = 1'b0;   assign CFGMSGRECEIVEDDEASSERTINTC = 1'b0;
-    assign CFGMSGRECEIVEDASSERTINTD = 1'b0;   assign CFGMSGRECEIVEDDEASSERTINTD = 1'b0;
-    assign CFGMSGRECEIVEDERRCOR = 1'b0;      assign CFGMSGRECEIVEDERRFATAL = 1'b0;
-    assign CFGMSGRECEIVEDERRNONFATAL = 1'b0;  assign CFGMSGRECEIVEDPMASNAK = 1'b0;
-    assign CFGMSGRECEIVEDPMETOACK = 1'b0;     assign CFGMSGRECEIVEDPMPME = 1'b0;
+    // root port: messages from the link (requester ID on CFGMSGDATA in the same cycle)
+    wire m_rp = DSP && msg_received;
+    assign CFGMSGRECEIVEDASSERTINTA   = m_rp && msg_code == 8'h20;
+    assign CFGMSGRECEIVEDASSERTINTB   = m_rp && msg_code == 8'h21;
+    assign CFGMSGRECEIVEDASSERTINTC   = m_rp && msg_code == 8'h22;
+    assign CFGMSGRECEIVEDASSERTINTD   = m_rp && msg_code == 8'h23;
+    assign CFGMSGRECEIVEDDEASSERTINTA = m_rp && msg_code == 8'h24;
+    assign CFGMSGRECEIVEDDEASSERTINTB = m_rp && msg_code == 8'h25;
+    assign CFGMSGRECEIVEDDEASSERTINTC = m_rp && msg_code == 8'h26;
+    assign CFGMSGRECEIVEDDEASSERTINTD = m_rp && msg_code == 8'h27;
+    assign CFGMSGRECEIVEDERRCOR       = m_rp && msg_code == 8'h30;
+    assign CFGMSGRECEIVEDERRNONFATAL  = m_rp && msg_code == 8'h31;
+    assign CFGMSGRECEIVEDERRFATAL     = m_rp && msg_code == 8'h33;
+    assign CFGMSGRECEIVEDPMASNAK      = m_rp && msg_code == 8'h14;
+    assign CFGMSGRECEIVEDPMPME        = m_rp && msg_code == 8'h18;
+    assign CFGMSGRECEIVEDPMETOACK     = m_rp && msg_code == 8'h1B;
     assign CFGTRANSACTION      = tl_cfg_v;
     assign CFGTRANSACTIONTYPE  = tl_cfg_wr;
     assign CFGTRANSACTIONADDR  = tl_cfg_a[6:0];
@@ -537,8 +569,8 @@ module pci_eerie #(
     assign CFGAERROOTERRCORRERRRECEIVED = 1'b0;  assign CFGAERROOTERRCORRERRREPORTINGEN = 1'b0;
     assign CFGAERROOTERRFATALERRRECEIVED = 1'b0; assign CFGAERROOTERRFATALERRREPORTINGEN = 1'b0;
     assign CFGAERROOTERRNONFATALERRRECEIVED = 1'b0; assign CFGAERROOTERRNONFATALERRREPORTINGEN = 1'b0;
-    assign CFGROOTCONTROLPMEINTEN = 1'b0; assign CFGROOTCONTROLSYSERRCORRERREN = 1'b0;
-    assign CFGROOTCONTROLSYSERRFATALERREN = 1'b0; assign CFGROOTCONTROLSYSERRNONFATALERREN = 1'b0;
+    assign CFGROOTCONTROLSYSERRCORRERREN = c_rootctl[0]; assign CFGROOTCONTROLSYSERRNONFATALERREN = c_rootctl[1];
+    assign CFGROOTCONTROLSYSERRFATALERREN = c_rootctl[2]; assign CFGROOTCONTROLPMEINTEN = c_rootctl[3];
     assign CFGSLOTCONTROLELECTROMECHILCTLPULSE = 1'b0;
 
     // flow control information (TRNFCSEL: 0xx receive allocation, 1xx transmit available)

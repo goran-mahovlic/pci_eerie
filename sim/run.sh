@@ -4,6 +4,7 @@
 # usage: sim/run.sh <config> [test] [extra xsim plusargs...]
 #   config: baseline  - pcie_7x with PCIE_2_1 hard block (reference)
 #           eerie     - pcie_7x with pci_eerie soft core
+#   (endpoint side; RP=eerie puts pci_eerie into the root port model as well, default RP=hard)
 set -e
 CFG=${1:-eerie}; TEST=${2:-pio_writeReadBack_test0}; shift 2 || true
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -26,15 +27,30 @@ if [ "${GEN2:-0}" = 1 ]; then DEFS="-d EP_GEN2=1 -d RP_GEN2"; SUFFIX="_gen2"; fi
 # APP=1: endpoint with the testbench memory application (tb/eerie_tb_ep.v) instead of pcie_7x_top_aximm
 if [ "${APP:-0}" = 1 ]; then DEFS="$DEFS -d EERIE_APP"; SUFFIX="${SUFFIX}_app"; fi
 [ "$CFG" = eerie ] && DEFS="$DEFS -d EERIE_DLL_MON"
+# RP=eerie: root port model with pci_eerie in place of its PCIE_2_1 instance (RP=hard: PCIE_2_1)
+RP=${RP:-hard}
+if [ "$RP" = eerie ]; then DEFS="$DEFS -d EERIE_RP"; SUFFIX="${SUFFIX}_rpe"; fi
 SUFFIX="$SUFFIX${BUILD_TAG:+_$BUILD_TAG}"
 B=$HERE/build_$CFG$SUFFIX; mkdir -p $B; cd $B
+RPORT=$PCIE_EX/pcie_2_1_rport_7x.v
+if [ "$RP" = eerie ]; then
+  # rename the one PCIE_2_1 instance of the root port core (rp_pcie_7x) to pci_eerie
+  sed 's/^\(\s*\)PCIE_2_1 #(  \/\/ Verilog-2001/\1pci_eerie #(/' "$PCIE_EX/pcie_2_1_rport_7x.v" > pcie_2_1_rport_7x_eerie.v
+  [ "$(grep -c '^\s*pci_eerie #(' pcie_2_1_rport_7x_eerie.v)" = 1 ] || { echo "root port PCIE_2_1 instance not found" >&2; exit 1; }
+  RPORT=$B/pcie_2_1_rport_7x_eerie.v
+fi
 {
   echo "verilog xil_defaultlib --include \"$EERIE/tb\" --include \"$PCIE_EX\" --include \"$EERIE/rtl\" \\"
-  for f in $(eval echo $(cat $HERE/files_common.f)); do echo "\"$f\" \\"; done
+  for f in $(eval echo $(cat $HERE/files_common.f)); do
+    [ "$f" = "$PCIE_EX/pcie_2_1_rport_7x.v" ] && f=$RPORT
+    echo "\"$f\" \\"
+  done
   if [ "$CFG" = baseline ]; then
     echo "\"$PCIE_7X/src/pcie_block.v\" \\"
   else
     echo "\"$EERIE/integration/pcie_block.v\" \\"
+  fi
+  if [ "$CFG" = eerie ] || [ "$RP" = eerie ]; then
     for f in $(cat $EERIE/rtl/files.f); do echo "\"$EERIE/rtl/$f\" \\"; done
   fi
   echo "\"$EERIE/tb/pci_exp_usrapp_tx.v\" \\"

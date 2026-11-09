@@ -1,6 +1,6 @@
 # pci_eerie
 
-An open-source soft PCI Express endpoint for Xilinx 7-series FPGAs, written in plain
+An open-source soft PCI Express endpoint and root port for Xilinx 7-series FPGAs, written in plain
 Verilog-2005 (synthesizes with Vivado and with yosys/openXC7).
 
 pci_eerie is an IO-level drop-in replacement for the `PCIE_2_1` integrated block: it has
@@ -11,8 +11,9 @@ soft core by renaming the module of that instance. Nothing else changes: the GT/
 wrapper, clocking, the TX/RX buffer BRAMs on the MIM ports, and the AXI↔TRN bridges all
 stay as they are.
 
-Scope: endpoint, x1, 2.5 GT/s and 5.0 GT/s (Gen1/Gen2), 64-bit TRN interface. Gen3 is not
-planned. The structure leaves room for more lanes and a root-port mode (see "Extending").
+Scope: endpoint or root port (selected like on `PCIE_2_1`, by `PCIE_CAP_DEVICE_PORT_TYPE`
+0 or 4), x1, 2.5 GT/s and 5.0 GT/s (Gen1/Gen2), 64-bit TRN interface. Gen3 is not planned.
+The structure leaves room for more lanes (see "Extending").
 
 ## Status
 
@@ -28,6 +29,21 @@ rather than a BFM. Current regression (`sim/regress.sh`), all passing:
 | `eerie_ur_test`: UR completions (MRd outside BARs, IORd w/o IO BAR), posted UR drop, Set_Slot_Power_Limit, Unlock, UR status bit | pass | |
 | `eerie_cfg_dump`: configuration space 0x000-0x090, 0x100-0x108 | identical to PCIE_2_1 | |
 | `eerie_stress_test` (40 write/read pairs) with a bit error injected into one TLP in each direction (Nak + replay both ways) | pass | pass |
+
+Root port: the same tests with pci_eerie in the root port model (`RP=eerie`), against the
+`PCIE_2_1` endpoint and against the pci_eerie endpoint, plus two root port tests that also run
+with the `PCIE_2_1` root port for comparison:
+
+| Test | RP pci_eerie, EP PCIE_2_1 | RP pci_eerie, EP pci_eerie | RP PCIE_2_1, EP either |
+|------|------|------|------|
+| the 9 runs above (Gen1 and Gen2) | all pass | all pass | (above) |
+| `eerie_cfg_dump` through the root port | identical to the reference | identical | |
+| `rp_cfg_dump`: the root port's own config space 0x000-0x12C via `cfg_mgmt`: reset value and read-back after writing all-ones / all-zeros | identical to the `PCIE_2_1` root port | identical | reference (`sim/ref/rp_cfg_dump_hard.txt`) |
+| `rp_link_test`: Retrain Link, Secondary Bus Reset, Link Disable, then endpoint access (re-enumerated after hot reset and disable) | pass | pass | pass |
+
+At Gen2 the pci_eerie root port trains at 2.5 GT/s and changes the link to 5.0 GT/s itself, as
+the `PCIE_2_1` root port does; the example root port runs its user clock at 62.5 MHz at both
+rates.
 
 At Gen1, the decoded link traffic of the pio test is identical, TLP for TLP, to the
 `PCIE_2_1` reference run (`sim/ref/`).
@@ -143,7 +159,8 @@ integration/pcie_block.v   pcie_7x's pcie_block with PCIE_2_1 replaced by pci_ee
 tb/                  testbench additions: board, PIPE/TLP monitors, error injection, extra tests,
                      a memory test application (eerie_tb_ep.v)
 sim/run.sh           xsim runner (Vivado 2023.2); sim/regress.sh runs several in parallel
-sim/ref/             decoded reference traces of the PCIE_2_1 runs
+sim/ref/             decoded reference traces / config dumps of the PCIE_2_1 runs (endpoint and
+                     root port: rp_cfg_dump_hard.txt)
 syn/                 Vivado implementation script (vivado_impl.tcl), board pin and timing
                      constraints, openXC7 Makefile, top_ypcb_k480t.v (K480T top for openXC7)
 tools/pipe_decode.py PIPE trace decoder (descrambles, frames, checks CRCs)
@@ -162,8 +179,12 @@ else is CERN-OHL-P v2 (see LICENSE) unless the file says otherwise.
 2. In the file that instantiates `PCIE_2_1`, rename the instance's module to `pci_eerie`.
    `integration/pcie_block.v` is `pcie_7x/src/pcie_block.v` with only that change.
 3. Keep `USERCLK2 = USERCLK`, 64-bit TRN (the pcie_7x settings: 62.5 MHz user clock at Gen1,
-   125 MHz at Gen2).
-4. Timing: `syn/pci_eerie_timing.xdc` shows the constraints. The core's PIPE↔user crossings
+   125 MHz at Gen2; a 62.5 MHz user clock at Gen2 also works, as in the root port example).
+4. Root port: instantiate it with the root port parameters (`PCIE_CAP_DEVICE_PORT_TYPE = 4`,
+   `HEADER_TYPE = 01h`, as Vivado's root port configuration of the core does). The type-1
+   header, the root port registers and the downstream link behaviour follow from those; the
+   requester/completer ID comes from `CFGDSBUSNUMBER/DEVICENUMBER/FUNCTIONNUMBER`.
+5. Timing: `syn/pci_eerie_timing.xdc` shows the constraints. The core's PIPE↔user crossings
    go through gray-coded FIFOs and 2-flop synchronizers, constrained as datapath-only paths.
 
 Parameters that matter: `LINK_CAP_MAX_LINK_SPEED`, `PL_FAST_TRAIN` (simulation timer
@@ -179,11 +200,21 @@ sim/run.sh eerie    pio_writeReadBack_test0 [-testplusarg pipe_log]   # soft cor
 sim/run.sh baseline pio_writeReadBack_test0 [-testplusarg pipe_log]   # PCIE_2_1 reference
 GEN2=1 sim/run.sh eerie ...                 # both link partners 5.0 GT/s capable
 APP=1  sim/run.sh eerie eerie_mem_test      # endpoint with the testbench memory application
+RP=eerie sim/run.sh baseline ...            # pci_eerie as the root port, PCIE_2_1 endpoint
+RP=eerie sim/run.sh eerie ...               # pci_eerie on both sides
+sim/run.sh baseline rp_cfg_dump             # root port's own config space (diff vs sim/ref)
 sim/run.sh eerie eerie_stress_test -testplusarg inject_rx_tlp=12 -testplusarg inject_tx_tlp=9
 python3 tools/pipe_decode.py sim/build_eerie/pipe.log | less
 sim/regress.sh                              # full regression (the 9 runs in the Status table)
 sim/regress.sh "GEN2=1 pio_writeReadBack_test0" "APP=1 eerie_mem_test"   # chosen runs
+sim/regress.sh "RP=eerie CFG=baseline APP=1 eerie_mem_test"              # CFG=: endpoint core
+sim/regress.sh rp baseline                 # root port regression (11 runs), PCIE_2_1 endpoint
 ```
+
+The endpoint side is `baseline` (`PCIE_2_1` in pcie_7x) or `eerie`. `RP=eerie` builds the root
+port model with its one `PCIE_2_1` instance renamed to `pci_eerie` (a generated copy of
+`pcie_2_1_rport_7x.v` in the build directory); `RP=hard` (default) keeps `PCIE_2_1`. The same
+tests run with all four combinations.
 
 Each run takes about 10-30 minutes (Vivado 2023.2 xsim, GTX model on both sides); the Gen2
 stress test is the longest. `eerie_mem_test` and `eerie_int_test` need `APP=1`: they use the
@@ -240,11 +271,27 @@ PM/MSI/MSI-X/PCIe/DSN capabilities and the `cfg_mgmt` port, capture of bus/devic
 UR completions, MSI and legacy INTx, PME_Turn_Off/PME_TO_Ack, PM_PME, Set_Slot_Power_Limit,
 hot reset and link disable (as upstream port).
 
+Root port (`PCIE_CAP_DEVICE_PORT_TYPE = 4`): downstream link training (link and lane number
+assignment), autonomous speed change to 5.0 GT/s after the link comes up (when both sides
+support it and Link Control 2 allows it), Retrain Link, Link Disable and hot reset (Secondary
+Bus Reset or `PLTRANSMITHOTRST`) as the directing side; type-1 header and the root port
+registers of the PCIe capability (slot status, Root Control, Root Status with PM_PME capture),
+matching the `PCIE_2_1` root port register for register (`rp_cfg_dump`); configuration space
+kept across link down; requests from the link (memory/IO, e.g. DMA and MSI writes) delivered on
+TRN RX while Bus Master Enable is set (UR otherwise, with BAR hits for the root port's own
+BAR0/BAR1), configuration requests from the link answered with UR, received messages decoded
+onto `CFGMSGRECEIVED*` (INTx, ERR_*, PM_PME, PME_TO_Ack, PM_Active_State_Nak) and not
+forwarded, the same as `PCIE_2_1` with `ENABLE_MSG_ROUTE = 0`.
+
 Not supported yet: more than one lane; initiating L0s/L1/L2 (the core never enters ASPM or
 PM L1 itself; its receiver tolerates the link partner's L0s); AER/ECRC; ERR_* error
 messages; VC/RBAR/VSEC capabilities; USERCLK2 ≠ USERCLK; 128-bit TRN; `rx_np_ok`
 throttling (non-posted requests are not held back); the DLLP and `PL2*`/`LL2*`/`TL2*` side
-interfaces of `PCIE_2_1` (mostly tied off); downstream (root port) operation.
+interfaces of `PCIE_2_1` (mostly tied off). As a root port: directed link changes on
+`PLDIRECTEDLINK*` (only the autonomous speed change), `ENABLE_MSG_ROUTE` (messages are never
+forwarded to TRN RX), sending PME_Turn_Off (`CFGPMSENDPMETON`), AER root error collection,
+slot/hot-plug registers (Presence Detect State reads 1), routing by the bridge windows;
+with a 62.5 MHz user clock at 5.0 GT/s the replay timer runs twice as long as required.
 
 ## Integration notes
 
@@ -266,6 +313,6 @@ Found while bringing the core up with `pcie_7x`:
   each per lane, a lane-deskew stage, an LTSSM that tracks TS reception per lane and assigns
   lane numbers, and a wider packet path towards the DLL (the DLL and TL already work on
   64-bit beats; x4 Gen2 needs 128 bits at 250 MHz or 64 bits at 500 MB/s per 125 MHz beat).
-* **Root port.** It needs the downstream LTSSM variants (link/lane number assignment in
-  Configuration, directed speed change), a type-1 header, and swapping the endpoint-only
-  TL rules (completer ID capture, BAR filtering). The DLL is symmetric.
+* **Root port.** Implemented (see above); the DLL is shared unchanged, the port role changes
+  the LTSSM's Configuration and Recovery/Hot Reset/Disabled branches, the configuration space
+  layout and the TL RX routing (`DSP` parameters of `eerie_ltssm` / `eerie_tl_rx`).

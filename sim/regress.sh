@@ -2,9 +2,16 @@
 # SPDX-License-Identifier: CERN-OHL-P
 # run several pci_eerie simulations in parallel and summarize
 #   sim/regress.sh "<env> <test> [plusargs]" ...      e.g.  "GEN2=1 pio_writeReadBack_test0"
+#                                                      (CFG=baseline: PCIE_2_1 endpoint, RP=eerie:
+#                                                      pci_eerie root port; see run.sh)
 #   sim/regress.sh                                     the full regression (9 runs, about 10-30 min
 #                                                      each, all in parallel; needs ~9 cores, ~5 GB)
+#   sim/regress.sh rp [baseline|eerie]                 the same 9 runs plus rp_cfg_dump and rp_link_test
+#                                                      with pci_eerie as the root port (RP=eerie) and the
+#                                                      given endpoint core (default eerie)
 HERE=$(cd "$(dirname "$0")" && pwd)
+PRE=""
+if [ "$1" = rp ]; then PRE="RP=eerie CFG=${2:-eerie} "; set --; fi
 if [ $# -eq 0 ]; then
   set -- "pio_writeReadBack_test0" \
          "GEN2=1 pio_writeReadBack_test0" \
@@ -15,23 +22,29 @@ if [ $# -eq 0 ]; then
          "SIMTIME=900000ns eerie_cfg_dump" \
          "SIMTIME=800000ns eerie_stress_test -testplusarg inject_rx_tlp=12 -testplusarg inject_tx_tlp=9" \
          "GEN2=1 SIMTIME=800000ns eerie_stress_test -testplusarg inject_rx_tlp=20 -testplusarg inject_tx_tlp=15"
+  if [ -n "$PRE" ]; then
+    set -- "$@" "SIMTIME=900000ns rp_cfg_dump" "SIMTIME=2000000ns rp_link_test"
+    specs=(); for a in "$@"; do specs+=("$PRE$a"); done; set -- "${specs[@]}"
+  fi
 fi
 i=0
 for spec in "$@"; do
-  envs=""; args=()
+  envs=""; args=(); cfg=eerie
   for w in $spec; do
-    if [[ $w =~ ^[A-Z_][A-Z0-9_]*= ]]; then envs="$envs $w"; else args+=("$w"); fi
+    if [[ $w =~ ^CFG= ]]; then cfg=${w#CFG=}
+    elif [[ $w =~ ^[A-Z_][A-Z0-9_]*= ]]; then envs="$envs $w"; else args+=("$w"); fi
   done
-  tag=r$i
-  ( env $envs BUILD_TAG=${BUILD_TAG_PREFIX:-}$tag "$HERE/run.sh" eerie "${args[@]}" > "$HERE/regress_$tag.out" 2>&1 ) &
+  tag=${BUILD_TAG_PREFIX:-}r$i
+  ( env $envs BUILD_TAG=$tag "$HERE/run.sh" $cfg "${args[@]}" > "$HERE/regress_$tag.out" 2>&1 ) &
   echo "$tag: $spec"
   i=$((i+1))
 done
 wait
+P=${BUILD_TAG_PREFIX:-}
 for ((j=0; j<i; j++)); do
   # the stock system check prints two "FAILED" lines in every run (it expects the example
   # design's device ID); a passing run has completed=1 and failure_lines=2
-  r=$(grep -c "Test Completed Successfully" "$HERE/regress_r$j.out")
-  f=$(grep -ciE "FAILED|ERROR|TIMEOUT" "$HERE/regress_r$j.out")
-  echo "r$j: completed=$r failure_lines=$f"
+  r=$(grep -c "Test Completed Successfully" "$HERE/regress_${P}r$j.out")
+  f=$(grep -ciE "FAILED|ERROR|TIMEOUT" "$HERE/regress_${P}r$j.out")
+  echo "${P}r$j: completed=$r failure_lines=$f"
 done

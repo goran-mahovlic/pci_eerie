@@ -21,6 +21,128 @@ begin : t_cfg_dump
 end
 
 // ---------------------------------------------------------------------------
+// root port's own configuration space through cfg_mgmt: reset value, bits that read
+// back 1 after writing all-ones, and bits that read back 1 after writing all-zeros
+// (diff the output of the PCIE_2_1 and pci_eerie root ports). Bits that would take the
+// link down are not written: Secondary Bus Reset, Link Disable/Retrain, PM power state.
+// ---------------------------------------------------------------------------
+else if (testname == "rp_cfg_dump")
+begin : t_rp_cfg_dump
+    integer a;
+    reg [31:0] v0, v1, v2, keep;
+    TSK_SIMULATION_TIMEOUT(10050);
+    TSK_SYSTEM_INITIALIZATION;
+    for (a = 0; a < 12'h130; a = (a == 12'h0FC) ? 12'h100 : a + 4) begin
+        keep = (a == 12'h03C) ? 32'h0040_0000 :          // bridge control: Secondary Bus Reset
+               (a == 12'h044) ? 32'h0000_0003 :          // PMCSR: power state
+               (a == 12'h070) ? 32'h0000_0030 : 32'd0;   // link control: disable, retrain
+        board.RP.cfg_usrapp.TSK_READ_CFG_DW(a >> 2);  v0 = board.RP.cfg_usrapp.cfg_do;
+        board.RP.cfg_usrapp.TSK_WRITE_CFG_DW(a >> 2, ~keep | (v0 & keep), 4'b0000);
+        board.RP.cfg_usrapp.TSK_READ_CFG_DW(a >> 2);  v1 = board.RP.cfg_usrapp.cfg_do;
+        board.RP.cfg_usrapp.TSK_WRITE_CFG_DW(a >> 2, v0 & keep, 4'b0000);
+        board.RP.cfg_usrapp.TSK_READ_CFG_DW(a >> 2);  v2 = board.RP.cfg_usrapp.cfg_do;
+        board.RP.cfg_usrapp.TSK_WRITE_CFG_DW(a >> 2, v0, 4'b0000);
+        $display("RPCFG %03x = %08x w1 %08x w0 %08x", a, v0, v1, v2);
+    end
+    $display("Test Completed Successfully");
+    $finish;
+end
+
+// ---------------------------------------------------------------------------
+// root port link control through cfg_mgmt: Retrain Link, Secondary Bus Reset (hot reset),
+// Link Disable; after each the endpoint must answer again (after the hot reset and the link
+// disable it has been reset, link down, and is re-enumerated). Works with either root port core.
+// ---------------------------------------------------------------------------
+else if (testname == "rp_link_test")
+begin : t_rp_link
+    integer fails, n, step;
+    reg [31:0] v, base;
+    reg left_l0, saw;
+    fails = 0;
+    TSK_SIMULATION_TIMEOUT(40050);
+    TSK_SYSTEM_INITIALIZATION;
+    TSK_BAR_INIT;
+    base = BAR_INIT_P_BAR[0][31:0];
+    for (step = 0; step < 3; step = step + 1) begin
+        board.RP.cfg_usrapp.TSK_READ_CFG_DW(12'h070 >> 2); v = board.RP.cfg_usrapp.cfg_do;
+        if (step == 0) begin
+            $display("[%t] : rp_link_test: Retrain Link", $realtime);
+            board.RP.cfg_usrapp.TSK_WRITE_CFG_DW(12'h070 >> 2, v | 32'h20, 4'b0000);
+        end else if (step == 1) begin
+            $display("[%t] : rp_link_test: Secondary Bus Reset", $realtime);
+            board.RP.cfg_usrapp.TSK_READ_CFG_DW(12'h03C >> 2); v = board.RP.cfg_usrapp.cfg_do;
+            board.RP.cfg_usrapp.TSK_WRITE_CFG_DW(12'h03C >> 2, v | 32'h0040_0000, 4'b0000);
+        end else begin
+            $display("[%t] : rp_link_test: Link Disable", $realtime);
+            board.RP.cfg_usrapp.TSK_WRITE_CFG_DW(12'h070 >> 2, v | 32'h10, 4'b0000);
+        end
+        // the link must leave L0 (and for hot reset / disable, the data link must go down)
+        left_l0 = 0; saw = 0;
+        for (n = 0; n < 200000 && !(left_l0 && (step == 0 || saw)); n = n + 1) begin
+            @(posedge board.RP.trn_clk);
+            if (board.RP.pl_ltssm_state != 6'h16) left_l0 = 1;
+            if (!board.RP.trn_lnk_up) saw = 1;
+            if (step == 1 && board.RP.pl_ltssm_state == 6'h21) saw = 1;
+            if (step == 2 && board.RP.pl_ltssm_state == 6'h22) saw = 1;
+        end
+        $display("[%t] : rp_link_test: step %0d left L0 %0d, link down / state seen %0d, LTSSM %h", $realtime,
+                 step, left_l0, saw, board.RP.pl_ltssm_state);
+        if (!left_l0 || (step != 0 && !saw)) fails = fails + 1;
+        if (step == 1) begin
+            TSK_TX_CLK_EAT(2000);
+            board.RP.cfg_usrapp.TSK_READ_CFG_DW(12'h03C >> 2); v = board.RP.cfg_usrapp.cfg_do;
+            board.RP.cfg_usrapp.TSK_WRITE_CFG_DW(12'h03C >> 2, v & ~32'h0040_0000, 4'b0000);
+        end
+        if (step == 2) begin
+            TSK_TX_CLK_EAT(2000);
+            board.RP.cfg_usrapp.TSK_READ_CFG_DW(12'h070 >> 2); v = board.RP.cfg_usrapp.cfg_do;
+            board.RP.cfg_usrapp.TSK_WRITE_CFG_DW(12'h070 >> 2, v & ~32'h10, 4'b0000);
+        end
+        // back to L0 with the data link up
+        for (n = 0; n < 400000 && !(board.RP.trn_lnk_up && board.RP.pl_ltssm_state == 6'h16); n = n + 1)
+            @(posedge board.RP.trn_clk);
+        TSK_TX_CLK_EAT(500);
+        if (!board.RP.trn_lnk_up) begin
+            $display("[%t] : rp_link_test FAILED step %0d: link did not come back", $realtime, step);
+            fails = fails + 1;
+        end
+        // the endpoint answers; after hot reset / link disable its BARs and Command register were reset
+        TSK_TX_TYPE0_CONFIGURATION_READ(DEFAULT_TAG, 12'h004, 4'hF); DEFAULT_TAG = DEFAULT_TAG + 1;
+        TSK_WAIT_FOR_READ_DATA;
+        $display("[%t] : rp_link_test: step %0d EP command/status %h", $realtime, step, P_READ_DATA);
+        if ((step != 0) != (P_READ_DATA[2:0] == 3'b000)) begin
+            $display("[%t] : rp_link_test FAILED step %0d: unexpected EP command %h", $realtime, step, P_READ_DATA);
+            fails = fails + 1;
+        end
+        if (step != 0) begin
+            // re-enumerate: BAR0 and Command again (TSK_BAR_INIT cannot be run twice)
+            TSK_TX_TYPE0_CONFIGURATION_WRITE(DEFAULT_TAG, 12'h010, base, 4'hF); DEFAULT_TAG = DEFAULT_TAG + 1;
+            TSK_TX_CLK_EAT(200);
+            TSK_TX_TYPE0_CONFIGURATION_WRITE(DEFAULT_TAG, 12'h004, 32'h0000_0007, 4'h1); DEFAULT_TAG = DEFAULT_TAG + 1;
+            TSK_TX_CLK_EAT(200);
+        end
+        DATA_STORE[0] = step; DATA_STORE[1] = 8'h5a; DATA_STORE[2] = 8'hc3; DATA_STORE[3] = 8'h3c;
+        TSK_TX_MEMORY_WRITE_32(DEFAULT_TAG, 3'd0, 10'd1, base + 32'h10, 4'h0, 4'hF, 1'b0); DEFAULT_TAG = DEFAULT_TAG + 1;
+        TSK_TX_CLK_EAT(100);
+        P_READ_DATA = 32'hFFFF_FFFF;
+        fork
+            TSK_TX_MEMORY_READ_32(DEFAULT_TAG, 3'd0, 10'd1, base + 32'h10, 4'h0, 4'hF);
+            TSK_WAIT_FOR_READ_DATA;
+        join
+        DEFAULT_TAG = DEFAULT_TAG + 1;
+        if (P_READ_DATA !== {DATA_STORE[3], DATA_STORE[2], DATA_STORE[1], DATA_STORE[0]} &&
+            P_READ_DATA !== {DATA_STORE[0], DATA_STORE[1], DATA_STORE[2], DATA_STORE[3]}) begin
+            $display("[%t] : rp_link_test FAILED step %0d: memory read back %h", $realtime, step, P_READ_DATA);
+            fails = fails + 1;
+        end else $display("[%t] : rp_link_test: step %0d memory access ok", $realtime, step);
+    end
+    if (fails == 0) $display("[%t] : rp_link_test PASSED", $realtime);
+    if (fails == 0) $display("Test Completed Successfully");
+    else $display("[%t] : TEST FAILED (%0d errors)", $realtime, fails);
+    $finish;
+end
+
+// ---------------------------------------------------------------------------
 // memory write / read-back with various lengths (needs +define EERIE_APP)
 // ---------------------------------------------------------------------------
 else if (testname == "eerie_mem_test")

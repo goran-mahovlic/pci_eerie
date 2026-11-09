@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: CERN-OHL-P
-// pci_eerie: Link Training and Status State Machine (upstream port, x1, Gen1/Gen2)
+// pci_eerie: Link Training and Status State Machine (x1, Gen1/Gen2)
+//
+// Upstream port (endpoint), or downstream port (DSP = 1, root port): the downstream port
+// assigns link and lane number 0 in Configuration, changes to 5.0 GT/s on its own after the
+// link comes up (when both sides support it and the target link speed allows it), and is
+// the side that directs Retrain, Hot Reset and Disable.
 //
 // State encodings follow the PCIE_2_1 pl_ltssm_state[5:0] values (pg054).
 `timescale 1ns / 1ps
@@ -8,7 +13,8 @@ module eerie_ltssm #(
     parameter FAST_TRAIN = 0,       // shorten timers for simulation
     parameter [7:0] N_FTS_GEN1 = 8'd255,
     parameter [7:0] N_FTS_GEN2 = 8'd255,
-    parameter       UPCONFIG   = 1       // advertise Link Upconfigure Capability (TS2 symbol 4 bit 6)
+    parameter       UPCONFIG   = 1,      // advertise Link Upconfigure Capability (TS2 symbol 4 bit 6)
+    parameter       DSP        = 0       // downstream port (root port)
 ) (
     input             clk,
     input             rst,
@@ -54,6 +60,13 @@ module eerie_ltssm #(
 
     // upper layer interface
     input             retrain_req,       // pulse: go to Recovery (e.g. REPLAY_NUM rollover)
+    // downstream port controls (ignored for an upstream port)
+    input             dsp_retrain,       // level: Retrain Link requested (until dsp_retrain_ack)
+    input             dsp_hot_reset,     // level: send Hot Reset (Secondary Bus Reset)
+    input             dsp_disable,       // level: Link Disable
+    input             dsp_target_gen2,   // level: target link speed >= 5.0 GT/s
+    input             dsp_dl_up,         // level: data link layer up (speed change starts after it)
+    output reg        dsp_retrain_ack,   // pulse: the Retrain Link request was taken
     output reg        link_up,           // LinkUp (to the DLL)
     output reg        in_l0,
     output reg [5:0]  ltssm_state,
@@ -149,6 +162,8 @@ module eerie_ltssm #(
     reg        rate_target;
     reg        hot_from_rx;
     reg        dis_scr_seen;
+    reg        spd_tried;        // downstream port: autonomous speed change done for this link up
+    reg        dsp_hot_q, dsp_dis_q, dsp_tgt_q, dsp_dl_q, dsp_rt_q, rt_taken;
 
     wire [7:0] my_rates = (MAX_RATE >= 2) ? 8'h06 : 8'h02;
     // symbol 4 bit 6: Link Upconfigure Capability in Configuration TS2s, selectable
@@ -207,6 +222,12 @@ module eerie_ltssm #(
     function [3:0] inc4(input [3:0] v); inc4 = (v == 4'hF) ? v : v + 1'b1; endfunction
 
     always @(posedge clk) begin
+        dsp_hot_q <= DSP && dsp_hot_reset; dsp_dis_q <= DSP && dsp_disable;
+        dsp_tgt_q <= DSP && dsp_target_gen2; dsp_dl_q <= DSP && dsp_dl_up;
+        dsp_rt_q  <= DSP && dsp_retrain;
+    end
+
+    always @(posedge clk) begin
         t_clr <= 1'b0;
         eieos_clr <= 1'b0;
         if (rst) begin
@@ -220,7 +241,10 @@ module eerie_ltssm #(
             directed_speed_change <= 1'b0; changed_speed_recovery <= 1'b0; successful_speed_neg <= 1'b0;
             idle_to_rlock <= 1'b0; rx_ei_seen <= 1'b0; rx_ts2_seen <= 1'b0; cur_gen2 <= 1'b0; t_cyc <= 12'd0;
             rate_target <= 1'b0; hot_from_rx <= 1'b0; dis_scr_seen <= 1'b0; rx_rate_rec <= 8'd0;
+            spd_tried <= 1'b0; dsp_retrain_ack <= 1'b0; rt_taken <= 1'b0;
         end else begin
+            dsp_retrain_ack <= 1'b0;
+            if (!dsp_rt_q) rt_taken <= 1'b0;
             ltssm_state <= st;
             sub_d <= sub;
             rs_go <= ei_time_ok && sub_d == 3'd4 && sub == 3'd4 && st == ST_RSPEED;
@@ -242,6 +266,7 @@ module eerie_ltssm #(
                 link_up <= 1'b0; directed_speed_change <= 1'b0; idle_to_rlock <= 1'b0;
                 changed_speed_recovery <= 1'b0; pipe_rxpolarity <= 1'b0; scramble_en <= 1'b1;
                 tx_link_pad <= 1'b1; tx_lane_pad <= 1'b1; tx_ctrl <= 8'd0; partner_gen2 <= 1'b0;
+                spd_tried <= 1'b0;
                 case (sub)
                 3'd0: begin
                     if (pipe_rate) begin
@@ -302,7 +327,16 @@ module eerie_ltssm #(
                 else if (to48) goto(ST_DQUIET);
             end
             // ------------------------------------------------------------ Configuration
-            ST_CLWSTART: begin
+            ST_CLWSTART: if (DSP) begin
+                // downstream: propose link number 0, lanes PAD; wait for the partner to echo it
+                tx_mode <= M_TS1; tx_link <= 8'd0; tx_link_pad <= 1'b0; tx_lane_pad <= 1'b1; tx_rate <= my_rates;
+                link_num <= 8'd0; lane_num <= 8'd0;
+                if (ts1 && !os_link_pad && ts_link_eq && os_lane_pad) cnt_a <= inc4(cnt_a);
+                else if (os_ts_valid) cnt_a <= 4'd0;
+                if (dsp_dis_q && ts_ge64) goto(ST_DISABLED);
+                else if (a_ge2 && cnt_fresh) goto(ST_CLWACCEPT);
+                else if (to24) goto(ST_DQUIET);
+            end else begin
                 tx_mode <= M_TS1; tx_link_pad <= 1'b1; tx_lane_pad <= 1'b1; tx_rate <= my_rates;
                 if (ts1 && !os_link_pad && os_lane_pad) begin
                     if (cnt_a != 0 && ts_link_eq) cnt_a <= inc4(cnt_a);
@@ -316,7 +350,11 @@ module eerie_ltssm #(
                     goto(ST_CLWACCEPT);
                 end else if (to24) goto(ST_DQUIET);
             end
-            ST_CLWACCEPT: begin
+            ST_CLWACCEPT: if (DSP) begin
+                // downstream: assign lane number 0 to the (only) lane
+                tx_mode <= M_TS1; tx_lane <= 8'd0; tx_lane_pad <= 1'b0; lane_at_entry <= 8'd0;
+                goto(ST_CLNWAIT);
+            end else begin
                 tx_mode <= M_TS1;
                 if (ts1 && !os_link_pad && ts_link_eq && !os_lane_pad) begin
                     if (cnt_a != 0 && ts_lane_eq) cnt_a <= inc4(cnt_a); else cnt_a <= 4'd1;
@@ -328,7 +366,14 @@ module eerie_ltssm #(
                     goto(ST_CLNWAIT);
                 end else if ((b_ge2 && cnt_fresh) || to2ms) goto(ST_DQUIET);
             end
-            ST_CLNWAIT: begin
+            ST_CLNWAIT: if (DSP) begin
+                // downstream: wait for TS1s that carry a lane number (the partner's echo)
+                tx_mode <= M_TS1;
+                if (ts1 && !os_link_pad && !os_lane_pad) cnt_a <= inc4(cnt_a);
+                else if (os_ts_valid) cnt_a <= 4'd0;
+                if (a_ge2 && cnt_fresh) goto(ST_CLNACCEPT);
+                else if (to2ms) goto(ST_DQUIET);
+            end else begin
                 tx_mode <= M_TS1;
                 if (ts1 && !os_lane_pad && !ts_lane_eq_entry && !os_link_pad) cnt_a <= inc4(cnt_a);
                 else if (ts2) cnt_a <= inc4(cnt_a);
@@ -337,7 +382,13 @@ module eerie_ltssm #(
                 if (a_ge2 && cnt_fresh) goto(ST_CLNACCEPT);
                 else if ((b_ge2 && cnt_fresh) || to2ms) goto(ST_DQUIET);
             end
-            ST_CLNACCEPT: begin
+            ST_CLNACCEPT: if (DSP) begin
+                // downstream: two TS1s whose link and lane numbers match the transmitted ones
+                tx_mode <= M_TS1;
+                if (ts1 && ts_match) cnt_a <= inc4(cnt_a); else if (os_ts_valid) cnt_a <= 4'd0;
+                if (a_ge2 && cnt_fresh) goto(ST_CCOMPLETE);
+                else if (to2ms) goto(ST_DQUIET);
+            end else begin
                 tx_mode <= M_TS1;
                 if (ts2 && ts_match) cnt_a <= inc4(cnt_a); else if (os_ts_valid) cnt_a <= 4'd0;
                 if (ts1 && !os_link_pad && ts_link_eq && !os_lane_pad && !ts_lane_eq) begin
@@ -384,6 +435,16 @@ module eerie_ltssm #(
                     if (ts1 && os_rate[7] && both_gen2) ; // speed change request handled in RcvrLock
                     goto(ST_RLOCK);
                 end else if (retrain_req) goto(ST_RLOCK);
+                else if (dsp_rt_q && !rt_taken) begin
+                    rt_taken <= 1'b1; dsp_retrain_ack <= 1'b1; goto(ST_RLOCK);
+                end
+                else if (dsp_hot_q || dsp_dis_q) goto(ST_RLOCK);   // via Recovery.Idle
+                else if (DSP && !spd_tried && dsp_dl_q && to20 && dsp_tgt_q && partner_gen2 &&
+                         (MAX_RATE >= 2) && !cur_gen2) begin
+                    // downstream port: change to 5.0 GT/s once after the link came up
+                    spd_tried <= 1'b1; directed_speed_change <= 1'b1;
+                    goto(ST_RLOCK);
+                end
             end
             // ------------------------------------------------------------ Recovery
             ST_RLOCK: begin
@@ -492,7 +553,9 @@ module eerie_ltssm #(
                 if (ts1 && os_ctrl[0]) cnt_b <= inc4(cnt_b);
                 else if (ts1 && os_lane_pad) cnt_b <= 4'd0;
                 if (rx_first && tx_idle_pair && tx_after != 6'h3F) tx_after <= tx_after + 1'b1;
-                if (b_ge2 && cnt_fresh) goto(ST_HOTRST);
+                if (dsp_hot_q) goto(ST_HOTRST);
+                else if (dsp_dis_q) goto(ST_DISABLED);
+                else if (b_ge2 && cnt_fresh) goto(ST_HOTRST);
                 else if (ts1 && os_ctrl[1]) goto(ST_DISABLED);
                 else if (ts1 && os_lane_pad) goto(ST_CLWSTART);
                 else if (a_ge4 && ta_ge8 && cnt_fresh) goto(ST_L0);
@@ -505,10 +568,22 @@ module eerie_ltssm #(
             ST_HOTRST: begin
                 link_up <= 1'b0;
                 tx_mode <= M_TS1; tx_ctrl <= 8'h01;
-                if (ts1 && os_ctrl[0]) t_clr <= 1'b1;      // stay while hot reset TS1s arrive
+                // upstream: stay while hot reset TS1s arrive; downstream: while directed
+                if (DSP ? dsp_hot_q : (ts1 && os_ctrl[0])) t_clr <= 1'b1;
                 if (tohot) begin tx_ctrl <= 8'd0; goto(ST_DQUIET); end
             end
-            ST_DISABLED: begin
+            ST_DISABLED: if (DSP) begin
+                // downstream: TS1s with the Disable Link bit, EIOS, then electrical idle while directed
+                link_up <= 1'b0;
+                case (sub)
+                3'd0: begin tx_mode <= M_TS1; tx_ctrl <= 8'h02; if (ts_ge64) sub <= 3'd1; end
+                3'd1: begin tx_mode <= M_EIOS; if (tx_eios_done) begin tx_mode <= M_EIDLE; sub <= 3'd2; end end
+                default: begin
+                    tx_mode <= M_EIDLE; tx_ctrl <= 8'd0;
+                    if (!dsp_dis_q) goto(ST_DQUIET);
+                end
+                endcase
+            end else begin
                 link_up <= 1'b0;
                 case (sub)
                 3'd0: begin tx_mode <= M_EIOS; if (tx_eios_done) begin tx_mode <= M_EIDLE; sub <= 3'd1; end end

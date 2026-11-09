@@ -6,6 +6,10 @@
 //
 //  The internal handler executes config requests (CfgRd0/CfgWr0), generates
 //  Unsupported Request completions, and decodes messages.
+//
+//  Root port (DSP = 1): requests from the link (memory, I/O, e.g. DMA and MSI writes)
+//  go to the user while Bus Master Enable is set, configuration requests are
+//  unsupported, and messages are decoded for the cfg_msg_received_* outputs.
 `timescale 1ns / 1ps
 module eerie_tl_rx #(
     parameter RXB_AW   = 10,          // RX buffer depth 2**RXB_AW beats
@@ -20,7 +24,8 @@ module eerie_tl_rx #(
     parameter [7:0]  INIT_PH = 8'd32,  parameter [11:0] INIT_PD = 12'd437,
     parameter [7:0]  INIT_NPH = 8'd12, parameter [11:0] INIT_NPD = 12'd24,
     parameter [7:0]  INIT_CPLH = 8'd36, parameter [11:0] INIT_CPLD = 12'd461,
-    parameter        CPL_INFINITE = 1
+    parameter        CPL_INFINITE = 1,
+    parameter        DSP = 0              // root port (downstream port)
 ) (
     input             clk,
     input             rst,              // link reset
@@ -82,6 +87,7 @@ module eerie_tl_rx #(
     // message / error events
     output reg        msg_received,
     output reg [15:0] msg_data,
+    output reg [7:0]  msg_code,
     output reg        msg_pme_to,
     output reg        msg_unlock,
     output reg        msg_setslot,
@@ -173,7 +179,7 @@ module eerie_tl_rx #(
     wire t_msg  = (typ[4:3] == 2'b10);
     wire t_atom = (typ == 5'b01100 || typ == 5'b01101 || typ == 5'b01110) && hasd;
 
-    wire mem_en = command[1], io_en = command[0];
+    wire mem_en = command[1], io_en = command[0], bm_en = command[2];
     reg [6:0] hit;
     always @(*) begin
         hit = 7'd0;
@@ -181,21 +187,21 @@ module eerie_tl_rx #(
             if (is_mem32(BAR0) && a_hi == 0 && (a_lo & bmask(BAR0)) == bar0) hit[0] = 1'b1;
             if (is_mem64(BAR0) && ({a_hi, a_lo} & {BAR1, bmask(BAR0)}) == {bar1, bar0}) hit[1:0] = 2'b11;
             if (is_mem32(BAR1) && !is_mem64(BAR0) && a_hi == 0 && (a_lo & bmask(BAR1)) == bar1) hit[1] = 1'b1;
-            if (is_mem32(BAR2) && a_hi == 0 && (a_lo & bmask(BAR2)) == bar2) hit[2] = 1'b1;
-            if (is_mem64(BAR2) && ({a_hi, a_lo} & {BAR3, bmask(BAR2)}) == {bar3, bar2}) hit[3:2] = 2'b11;
-            if (is_mem32(BAR3) && !is_mem64(BAR2) && a_hi == 0 && (a_lo & bmask(BAR3)) == bar3) hit[3] = 1'b1;
-            if (is_mem32(BAR4) && a_hi == 0 && (a_lo & bmask(BAR4)) == bar4) hit[4] = 1'b1;
-            if (is_mem64(BAR4) && ({a_hi, a_lo} & {BAR5, bmask(BAR4)}) == {bar5, bar4}) hit[5:4] = 2'b11;
-            if (is_mem32(BAR5) && !is_mem64(BAR4) && a_hi == 0 && (a_lo & bmask(BAR5)) == bar5) hit[5] = 1'b1;
+            if (!DSP && is_mem32(BAR2) && a_hi == 0 && (a_lo & bmask(BAR2)) == bar2) hit[2] = 1'b1;
+            if (!DSP && is_mem64(BAR2) && ({a_hi, a_lo} & {BAR3, bmask(BAR2)}) == {bar3, bar2}) hit[3:2] = 2'b11;
+            if (!DSP && is_mem32(BAR3) && !is_mem64(BAR2) && a_hi == 0 && (a_lo & bmask(BAR3)) == bar3) hit[3] = 1'b1;
+            if (!DSP && is_mem32(BAR4) && a_hi == 0 && (a_lo & bmask(BAR4)) == bar4) hit[4] = 1'b1;
+            if (!DSP && is_mem64(BAR4) && ({a_hi, a_lo} & {BAR5, bmask(BAR4)}) == {bar5, bar4}) hit[5:4] = 2'b11;
+            if (!DSP && is_mem32(BAR5) && !is_mem64(BAR4) && a_hi == 0 && (a_lo & bmask(BAR5)) == bar5) hit[5] = 1'b1;
             if (!hasd && rom_en && MROM != 0 && a_hi == 0 && (a_lo & MROM) == rom_bar) hit[6] = 1'b1;
         end
         if (t_io && io_en) begin
             if (is_io(BAR0) && (a_lo & bmask(BAR0)) == bar0) hit[0] = 1'b1;
             if (is_io(BAR1) && (a_lo & bmask(BAR1)) == bar1) hit[1] = 1'b1;
-            if (is_io(BAR2) && (a_lo & bmask(BAR2)) == bar2) hit[2] = 1'b1;
-            if (is_io(BAR3) && (a_lo & bmask(BAR3)) == bar3) hit[3] = 1'b1;
-            if (is_io(BAR4) && (a_lo & bmask(BAR4)) == bar4) hit[4] = 1'b1;
-            if (is_io(BAR5) && (a_lo & bmask(BAR5)) == bar5) hit[5] = 1'b1;
+            if (!DSP && is_io(BAR2) && (a_lo & bmask(BAR2)) == bar2) hit[2] = 1'b1;
+            if (!DSP && is_io(BAR3) && (a_lo & bmask(BAR3)) == bar3) hit[3] = 1'b1;
+            if (!DSP && is_io(BAR4) && (a_lo & bmask(BAR4)) == bar4) hit[4] = 1'b1;
+            if (!DSP && is_io(BAR5) && (a_lo & bmask(BAR5)) == bar5) hit[5] = 1'b1;
         end
     end
 
@@ -208,6 +214,11 @@ module eerie_tl_rx #(
         else if (t_msg || (t_mem && hasd)) ctype = 2'd0;
         else ctype = 2'd1;
         if (malformed) route = R_DROP;
+        // root port: requests from the link are forwarded upstream (to the user) while bus
+        // mastering is enabled; a hit in the root port's own BARs is reported on trn_rbar_hit
+        else if (DSP && (t_mem || t_io) && !t_mrdlk)
+            route = (bm_en || hit != 0) ? R_USER : (hasd && t_mem ? R_DROP : R_UR);
+        else if (DSP && (t_cfg0 || t_cfg1)) route = R_UR;
         else if (t_mem && !t_mrdlk) route = (hit != 0) ? R_USER : (hasd ? R_DROP : R_UR);
         else if (t_mrdlk) route = R_UR;
         else if (t_io) route = (hit != 0) ? R_USER : R_UR;
@@ -430,7 +441,7 @@ module eerie_tl_rx #(
                     ist <= I_CPL;
                 end
                 R_MSG: begin
-                    msg_received <= 1'b1; msg_data <= g1[31:16];
+                    msg_received <= 1'b1; msg_data <= g1[31:16]; msg_code <= g1[7:0];
                     case (g1[7:0])
                     8'h19: msg_pme_to <= 1'b1;
                     8'h00: msg_unlock <= 1'b1;

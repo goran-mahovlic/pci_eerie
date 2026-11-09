@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: CERN-OHL-P
-// pci_eerie: Type-0 configuration space (single function endpoint)
+// pci_eerie: configuration space, single function: type-0 header (endpoint) or type-1 header
+// with the root port registers of the PCI Express capability (root port, HEADER_TYPE 01h)
 //
 // Register values use little-endian register order: rdata[7:0] is the byte at
 // the lowest address.  Parameters follow PCIE_2_1 names where they exist.
@@ -30,6 +31,10 @@ module eerie_cfg #(
     parameter         PM_CAP_D2SUPPORT = "FALSE",
     parameter [4:0]   PM_CAP_PMESUPPORT = 5'h00,
     parameter         PM_CSR_NOSOFTRST = "TRUE",
+    parameter         PM_CSR_B2B3 = "FALSE",
+    parameter         PM_CSR_BPCCEN = "FALSE",
+    parameter [63:0]  PM_DATA = 64'd0,          // {PM_DATA7 .. PM_DATA0}
+    parameter [15:0]  PM_DATA_SCALE = 16'd0,    // {PM_DATA_SCALE7 .. PM_DATA_SCALE0}
     // MSI
     parameter         MSI_CAP_ON = "TRUE",
     parameter [7:0]   MSI_BASE_PTR = 8'h48,
@@ -52,6 +57,7 @@ module eerie_cfg #(
     parameter [3:0]   PCIE_CAP_CAPABILITY_VERSION = 4'h2,
     parameter [3:0]   PCIE_CAP_DEVICE_PORT_TYPE = 4'h0,
     parameter         PCIE_CAP_SLOT_IMPLEMENTED = "FALSE",
+    parameter         ROOT_CAP_CRS_SW_VISIBILITY = "FALSE",
     parameter integer DEV_CAP_MAX_PAYLOAD_SUPPORTED = 2,
     parameter integer DEV_CAP_PHANTOM_FUNCTIONS_SUPPORT = 0,
     parameter         DEV_CAP_EXT_TAG_SUPPORTED = "FALSE",
@@ -128,6 +134,9 @@ module eerie_cfg #(
     input             set_pme_status,
     input             slot_pwr_v,
     input      [9:0]  slot_pwr,        // {scale[1:0], value[7:0]} from Set_Slot_Power_Limit
+    input             set_pme_req,     // root port: PM_PME received from pme_req_id
+    input      [15:0] pme_req_id,
+    input             lnk_retrain_clr, // root port: Retrain Link taken by the LTSSM
 
     // decoded control outputs
     output     [15:0] command,
@@ -148,6 +157,8 @@ module eerie_cfg #(
     output            msix_enable,
     output            msix_fmask,
     output     [7:0]  int_line,
+    output     [15:0] bridge_control,  // type-1 header
+    output     [7:0]  root_control,
     output reg        flr_pulse,
     // BARs (masked values, type bits stripped) for address decode
     output     [31:0] bar0, bar1, bar2, bar3, bar4, bar5, rom_bar,
@@ -159,6 +170,8 @@ module eerie_cfg #(
     localparam ISON_DSN  = (DSN_CAP_ON == "TRUE");
     localparam MSI64     = (MSI_CAP_64_BIT_ADDR_CAPABLE == "TRUE");
     localparam MSIPVM    = (MSI_CAP_PER_VECTOR_MASKING_CAPABLE == "TRUE");
+    localparam T1        = (HEADER_TYPE[6:0] == 7'h01);           // type-1 header (bridge)
+    localparam RP        = (PCIE_CAP_DEVICE_PORT_TYPE == 4'h4);  // root port
 
     function [31:0] bar_mask;     // writable bits of a BAR
         input [31:0] p;
@@ -207,6 +220,13 @@ module eerie_cfg #(
     reg [15:0] r_devctl2;
     reg [15:0] r_lnkctl2;
     reg [9:0]  r_slot_pwr;
+    reg [3:0]  r_pm_dsel;      // PMCSR Data Select
+    reg [31:0] r_t1_18, r_t1_1c, r_t1_20, r_t1_24, r_t1_28, r_t1_2c, r_t1_30;   // type-1 0x18..0x30
+    reg [15:0] r_t1_secsts;    // secondary status (RW1C)
+    reg [15:0] r_brctl;        // bridge control
+    reg [7:0]  r_rootctl;      // root control
+    reg        r_root_pme;     // root status: PME status
+    reg [15:0] r_root_pme_id;
 
     // ---------------- read-only images ----------------
     wire [2:0]  mps_sup  = DEV_CAP_MAX_PAYLOAD_SUPPORTED;
@@ -242,7 +262,10 @@ module eerie_cfg #(
     wire [2:0]  pm_aux = PM_CAP_AUXCURRENT;
     wire [15:0] pmc = {PM_CAP_PMESUPPORT, (PM_CAP_D2SUPPORT == "TRUE"), (PM_CAP_D1SUPPORT == "TRUE"),
                        pm_aux, (PM_CAP_DSI == "TRUE"), 1'b0, (PM_CAP_PME_CLOCK == "TRUE"), pm_ver};
-    wire [15:0] pmcsr = {r_pme_sts, 6'd0, r_pme_en, 4'd0, (PM_CSR_NOSOFTRST == "TRUE"), 1'b0, r_pm_state};
+    wire [7:0]  pm_data  = r_pm_dsel[3] ? 8'd0 : PM_DATA[r_pm_dsel[2:0]*8 +: 8];
+    wire [1:0]  pm_scale = r_pm_dsel[3] ? 2'd0 : PM_DATA_SCALE[r_pm_dsel[2:0]*2 +: 2];
+    wire [15:0] pmcsr = {r_pme_sts, pm_scale, r_pm_dsel, r_pme_en, 4'd0, (PM_CSR_NOSOFTRST == "TRUE"), 1'b0, r_pm_state};
+    wire [7:0]  pmcsr_bse = {(PM_CSR_BPCCEN == "TRUE"), (PM_CSR_B2B3 == "TRUE"), 6'd0};
     wire [2:0]  tbir = MSIX_CAP_TABLE_BIR;
     wire [2:0]  pbir = MSIX_CAP_PBA_BIR;
 
@@ -263,6 +286,21 @@ module eerie_cfg #(
     assign msix_enable = r_msix_en;
     assign msix_fmask = r_msix_fm;
     assign int_line = r_intline;
+    assign bridge_control = r_brctl;
+    assign root_control = r_rootctl;
+    // type-1 header registers 0x18..0x30 follow the PCIE_2_1 root port: the writable bits of
+    // 0x18 (bus numbers), 0x20 (memory) and 0x24 (prefetchable) are BAR2/BAR4/BAR5; with BAR3
+    // set, 0x1C (I/O base/limit) has I/O addressing bits 010Fh and 0x30 (I/O upper) is writable
+    localparam [31:0] T1M_18 = BAR2, T1M_20 = BAR4, T1M_24 = BAR5;
+    localparam [31:0] T1R_1C = (BAR3 != 0) ? 32'h0000010F : 32'd0;
+    localparam [31:0] T1M_1C = (BAR3 != 0) ? (BAR3 & 32'h0000FEF0) : 32'd0;
+    localparam [31:0] T1M_30 = (BAR3 != 0) ? 32'hFFFFFFFF : 32'd0;
+    localparam [31:0] T1M_28 = (BAR5[3:0] == 4'hC || BAR5[3:0] == 4'h4) ? 32'hFFFFFFFF : 32'd0;
+    // root port Link Control: ASPM, common clock, extended sync, HW autonomous width disable,
+    // plus Link Disable and Retrain Link (always reads 0)
+    localparam [15:0] LNKCTL_MASK  = RP ? 16'h02F3 : 16'h0FCB;
+    localparam [15:0] DEVCTL2_MASK = RP ? 16'h0750 : 16'h001F;
+    localparam [15:0] LNKCTL2_MASK = RP ? 16'h1FBF : 16'h007F;
     assign bar0 = r_bar0 & M0; assign bar1 = r_bar1 & M1; assign bar2 = r_bar2 & M2;
     assign bar3 = r_bar3 & M3; assign bar4 = r_bar4 & M4; assign bar5 = r_bar5 & M5;
     assign rom_bar = r_rom & MROM; assign rom_en = r_rom_en && (MROM != 32'd0);
@@ -280,17 +318,26 @@ module eerie_cfg #(
         else if (a == 10'h003) rv = {8'h00, HEADER_TYPE, 8'h00, r_cls};
         else if (a == 10'h004) rv = (r_bar0 & M0) | R0;
         else if (a == 10'h005) rv = (r_bar1 & M1) | R1;
+        else if (T1 && a == 10'h006) rv = r_t1_18 & T1M_18;
+        else if (T1 && a == 10'h007) rv = {r_t1_secsts, (r_t1_1c[15:0] & T1M_1C[15:0]) | T1R_1C[15:0]};
+        else if (T1 && a == 10'h008) rv = r_t1_20 & T1M_20;
+        else if (T1 && a == 10'h009) rv = r_t1_24 & T1M_24;
+        else if (T1 && a == 10'h00A) rv = r_t1_28 & T1M_28;
+        else if (T1 && a == 10'h00B) rv = r_t1_2c & T1M_28;
+        else if (T1 && a == 10'h00C) rv = r_t1_30 & T1M_30;
+        else if (T1 && a == 10'h00E) rv = (r_rom & MROM) | {31'd0, r_rom_en && MROM != 0};
+        else if (T1 && a == 10'h00F) rv = {r_brctl, INTERRUPT_PIN, r_intline};
         else if (a == 10'h006) rv = (r_bar2 & M2) | R2;
         else if (a == 10'h007) rv = (r_bar3 & M3) | R3;
         else if (a == 10'h008) rv = (r_bar4 & M4) | R4;
         else if (a == 10'h009) rv = (r_bar5 & M5) | R5;
         else if (a == 10'h00A) rv = CARDBUS_CIS_POINTER;
         else if (a == 10'h00B) rv = {subsys_id, subsys_vend_id};
-        else if (a == 10'h00C) rv = (r_rom & MROM) | {31'd0, r_rom_en && MROM != 0};
+        else if (!T1 && a == 10'h00C) rv = (r_rom & MROM) | {31'd0, r_rom_en && MROM != 0};
         else if (a == 10'h00D) rv = {24'd0, CAPABILITIES_PTR};
         else if (a == 10'h00F) rv = {16'h0000, INTERRUPT_PIN, r_intline};
         else if (ISON_PM && a == PM0)       rv = {pmc, PM_CAP_NEXTPTR, 8'h01};
-        else if (ISON_PM && a == PM0 + 1)   rv = {16'h0000, pmcsr};
+        else if (ISON_PM && a == PM0 + 1)   rv = {pm_data, pmcsr_bse, pmcsr};
         else if (ISON_MSI && a == MSI0)     rv = {msi_ctl, MSI_CAP_NEXTPTR, 8'h05};
         else if (ISON_MSI && a == MSI0 + 1) rv = {r_msi_alo[31:2], 2'b00};
         else if (ISON_MSI && MSI64 && a == MSI0 + 2) rv = r_msi_ahi;
@@ -304,7 +351,11 @@ module eerie_cfg #(
         else if (a == PX0 + 1)  rv = devcap;
         else if (a == PX0 + 2)  rv = {dev_status, r_devctl};
         else if (a == PX0 + 3)  rv = lnkcap;
-        else if (a == PX0 + 4)  rv = {link_status, r_lnkctl};
+        else if (a == PX0 + 4)  rv = {link_status, r_lnkctl & ~16'h0020};   // Retrain Link reads 0
+        // slot registers: with no slot implemented a downstream port reports Presence Detect State 1
+        else if (RP && a == PX0 + 6) rv = {16'h0040, 16'h0000};
+        else if (RP && a == PX0 + 7) rv = {15'd0, (ROOT_CAP_CRS_SW_VISIBILITY == "TRUE"), 8'd0, r_rootctl};
+        else if (RP && a == PX0 + 8) rv = {14'd0, 1'b0, r_root_pme, r_root_pme_id};
         else if (a == PX0 + 9)  rv = devcap2;                    // +24h Device Capabilities 2
         else if (a == PX0 + 10) rv = {16'h0000, r_devctl2};      // +28h Device Control/Status 2
         // Link Status 2 bit 0 (bit 16 here): current de-emphasis, the PHY always runs at -3.5 dB
@@ -343,8 +394,13 @@ module eerie_cfg #(
             r_devctl <= 16'h2810 | ((DEV_CONTROL_EXT_TAG_DEFAULT == "TRUE") ? 16'h0100 : 16'h0000);
             r_devsts <= 4'd0; r_lnkctl <= 16'd0; r_devctl2 <= 16'd0;
             r_lnkctl2 <= {12'd0, (LINK_CTRL2_TARGET_LINK_SPEED == 4'd0) ? LINK_CAP_MAX_LINK_SPEED : LINK_CTRL2_TARGET_LINK_SPEED};
-            r_slot_pwr <= 10'd0;
+            r_slot_pwr <= 10'd0; r_pm_dsel <= 4'd0;
+            r_t1_18 <= 32'd0; r_t1_1c <= 32'd0; r_t1_20 <= 32'd0; r_t1_24 <= 32'd0; r_t1_28 <= 32'd0;
+            r_t1_2c <= 32'd0; r_t1_30 <= 32'd0; r_t1_secsts <= 16'd0; r_brctl <= 16'd0;
+            r_rootctl <= 8'd0; r_root_pme <= 1'b0; r_root_pme_id <= 16'd0;
         end else begin
+            if (lnk_retrain_clr) r_lnkctl[5] <= 1'b0;
+            if (set_pme_req && !r_root_pme) begin r_root_pme <= 1'b1; r_root_pme_id <= pme_req_id; end
             // error / status set inputs
             if (set_ur_detected)       r_devsts[3] <= 1'b1;
             if (set_fatal_detected)    r_devsts[2] <= 1'b1;
@@ -370,14 +426,31 @@ module eerie_cfg #(
                 if (a == 10'h007) r_bar3 <= rw(r_bar3, wd, bm & M3);
                 if (a == 10'h008) r_bar4 <= rw(r_bar4, wd, bm & M4);
                 if (a == 10'h009) r_bar5 <= rw(r_bar5, wd, bm & M5);
-                if (a == 10'h00C) begin r_rom <= rw(r_rom, wd, bm & MROM); if (req_be[0]) r_rom_en <= wd[0]; end
+                if (a == (T1 ? 10'h00E : 10'h00C)) begin
+                    r_rom <= rw(r_rom, wd, bm & MROM); if (req_be[0]) r_rom_en <= wd[0];
+                end
                 if (a == 10'h00F && req_be[0]) r_intline <= wd[7:0];
+                if (T1) begin
+                    if (a == 10'h006) r_t1_18 <= rw(r_t1_18, wd, bm & T1M_18);
+                    if (a == 10'h007) begin
+                        r_t1_1c <= rw(r_t1_1c, wd, bm & T1M_1C);
+                        t = rw1c({r_t1_secsts, 16'd0}, wd, bm & 32'hF9000000, req_rw1c_as_rw); r_t1_secsts <= t[31:16];
+                    end
+                    if (a == 10'h008) r_t1_20 <= rw(r_t1_20, wd, bm & T1M_20);
+                    if (a == 10'h009) r_t1_24 <= rw(r_t1_24, wd, bm & T1M_24);
+                    if (a == 10'h00A) r_t1_28 <= rw(r_t1_28, wd, bm & T1M_28);
+                    if (a == 10'h00B) r_t1_2c <= rw(r_t1_2c, wd, bm & T1M_28);
+                    if (a == 10'h00C) r_t1_30 <= rw(r_t1_30, wd, bm & T1M_30);
+                    // bridge control: parity/SERR/ISA/VGA/VGA16, Secondary Bus Reset
+                    if (a == 10'h00F) begin t = rw({r_brctl, 16'd0}, wd, bm & 32'h005F0000); r_brctl <= t[31:16]; end
+                end
                 if (ISON_PM && a == PM0 + 1) begin
                     if (req_be[0] && (wd[1:0] == 2'b00 || wd[1:0] == 2'b11 ||
                                       (wd[1:0] == 2'b01 && PM_CAP_D1SUPPORT == "TRUE") ||
                                       (wd[1:0] == 2'b10 && PM_CAP_D2SUPPORT == "TRUE")))
                         r_pm_state <= wd[1:0];
                     if (req_be[1]) begin
+                        r_pm_dsel <= wd[12:9];
                         if (PM_CAP_PMESUPPORT != 5'd0) r_pme_en <= wd[8];
                         if (wd[15] && !req_rw1c_as_rw) r_pme_sts <= 1'b0;
                         else if (req_rw1c_as_rw) r_pme_sts <= wd[15];
@@ -399,20 +472,26 @@ module eerie_cfg #(
                 if (a == PX0 + 2) begin
                     // Device Control (FLR bit 15 self-clearing) / Device Status RW1C
                     t = rw({16'd0, r_devctl}, wd, bm & {16'd0, 16'h7FFF &
-                           {1'b1, 3'b111, 1'b1, 1'b1, (DEV_CAP_PHANTOM_FUNCTIONS_SUPPORT != 0),
+                           {1'b1, 3'b111, 1'b1, !RP, (DEV_CAP_PHANTOM_FUNCTIONS_SUPPORT != 0),
                             (DEV_CAP_EXT_TAG_SUPPORTED == "TRUE"), 3'b111, 5'b11111}});
                     r_devctl <= t[15:0];
                     if (req_be[1] && wd[15] && DEV_CAP_FUNCTION_LEVEL_RESET_CAPABLE == "TRUE") flr_pulse <= 1'b1;
                     t = rw1c({12'd0, r_devsts, 16'd0}, wd, bm & 32'h000F0000, req_rw1c_as_rw); r_devsts <= t[19:16];
                 end
                 if (a == PX0 + 4) begin
-                    t = rw({16'd0, r_lnkctl}, wd, bm & 32'h00000FCB); r_lnkctl <= t[15:0];
+                    t = rw({16'd0, r_lnkctl}, wd, bm & {16'd0, LNKCTL_MASK}); r_lnkctl <= t[15:0];
                 end
                 if (a == PX0 + 10) begin
-                    t = rw({16'd0, r_devctl2}, wd, bm & 32'h0000001F); r_devctl2 <= t[15:0];
+                    t = rw({16'd0, r_devctl2}, wd, bm & {16'd0, DEVCTL2_MASK}); r_devctl2 <= t[15:0];
                 end
                 if (a == PX0 + 12) begin
-                    t = rw({16'd0, r_lnkctl2}, wd, bm & 32'h0000007F); r_lnkctl2 <= t[15:0];
+                    t = rw({16'd0, r_lnkctl2}, wd, bm & {16'd0, LNKCTL2_MASK}); r_lnkctl2 <= t[15:0];
+                end
+                if (RP && a == PX0 + 7) begin
+                    t = rw({24'd0, r_rootctl}, wd, bm & {28'd0, 4'hF}); r_rootctl <= t[7:0];
+                end
+                if (RP && a == PX0 + 8 && req_be[2]) begin
+                    if (req_rw1c_as_rw) r_root_pme <= wd[16]; else if (wd[16]) r_root_pme <= 1'b0;
                 end
             end
         end
