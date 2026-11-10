@@ -29,6 +29,8 @@ module eerie_pl_rx_ml #(
     output     [81:0]  pkt_wd
 );
     `include "eerie_funcs.vh"
+    reg w4_q = 1'b0;                 // local copy of the (quasi-static) width
+    always @(posedge clk) w4_q <= w4;
     localparam K_COM = 8'hBC, K_STP = 8'hFB, K_SDP = 8'h5C, K_END = 8'hFD, K_EDB = 8'hFE;
 
     // ---------------- DW assembly ----------------
@@ -44,7 +46,7 @@ module eerie_pl_rx_ml #(
     always @(*) begin
         n_dw = 2'd0; dw0 = 32'd0; dw1 = 32'd0; dk0 = 4'd0; dk1 = 4'd0; de0 = 1'b0; de1 = 1'b0;
         n_hv = h_v; n_hd = h_d; n_hk = h_k; n_he = h_e;
-        if (w4) begin
+        if (w4_q) begin
             // compact A/B into DW slots
             if (i_va) begin
                 dw0 = {i_da[7:0], i_da[15:8], i_da[23:16], i_da[31:24]}; dk0 = {i_ka[0], i_ka[1], i_ka[2], i_ka[3]};

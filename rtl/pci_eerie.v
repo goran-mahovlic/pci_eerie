@@ -139,7 +139,11 @@ module pci_eerie #(
     // root port: link controls from the configuration space (user clock), synchronized below
     wire        p_dsp_retrain, p_dsp_hot, p_dsp_dis, p_dsp_tgt2, p_dl_up, p_retrain_ack;
 
-    wire        ml = (NL > 1) && (p_width >= 4'd2);            // x2 / x4 data path
+    // registered link width for the data path (the width settles in Configuration, long before
+    // any data): keeps the LTSSM out of the multi-lane data path's timing
+    reg  [3:0]  p_width_d = 4'd1;
+    always @(posedge pclk) p_width_d <= p_width;
+    wire        ml = (NL > 1) && (p_width_d >= 4'd2);          // x2 / x4 data path
     wire        st_pop;                                       // striper FIFO pop
     wire [8*NL-1:0] st_s0, st_s1;
     wire [NL-1:0]   st_k0, st_k1;
@@ -160,7 +164,7 @@ module pci_eerie #(
             .ln_v(ln_v[gl]), .ln_d(ln_d[16*gl +: 16]), .ln_k(ln_k[2*gl +: 2]), .ln_com(ln_com[2*gl +: 2]),
             .ln_skp(ln_skp[2*gl +: 2]), .ln_err(ln_err[gl])
         );
-        wire ext = ml && (gl < p_width);
+        wire ext = ml && (gl < p_width_d);
         eerie_pl_tx pl_tx (
             .clk(pclk), .rst(p_rst),
             .mode(lane_en[gl] ? tx_mode : M_EIDLE),
@@ -200,12 +204,12 @@ module pci_eerie #(
         wire       m_we, m_err;
         wire [81:0] m_wd;
         eerie_pl_rx_ml #(.N(NL)) rx_ml (
-            .clk(pclk), .rst(p_rst || !ml), .w4(p_width >= 4'd4),
+            .clk(pclk), .rst(p_rst || !ml), .w4(p_width_d >= 4'd4),
             .i_va(d_va), .i_vb(d_vb), .i_da(d_da), .i_db(d_db), .i_ka(d_ka), .i_kb(d_kb), .i_erra(d_ea), .i_errb(d_eb),
             .rx_err(m_err), .pkt_we(m_we), .pkt_wd(m_wd)
         );
         eerie_pl_tx_ml #(.N(NL)) tx_ml (
-            .clk(pclk), .rst(p_rst), .en(ml), .w4(p_width >= 4'd4),
+            .clk(pclk), .rst(p_rst), .en(ml), .w4(p_width_d >= 4'd4),
             .run(tx_mode == M_DATA || tx_mode == M_IDLE), .data_mode(tx_mode == M_DATA),
             .pkt_rd_data(pltx_rd_data), .pkt_rd_empty(pltx_rd_empty), .pkt_rd_en(st_pop),
             .s0(st_s0), .s1(st_s1), .k0(st_k0), .k1(st_k1), .idle(st_idle), .busy(st_busy)

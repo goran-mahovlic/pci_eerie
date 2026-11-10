@@ -29,6 +29,8 @@ module eerie_pl_tx_ml #(
     output reg           busy          // the pair just driven belongs to a packet or SKP OS
 );
     localparam K_COM = 8'hBC, K_SKP = 8'h1C;
+    reg w4_q = 1'b0;                 // local copy of the (quasi-static) width
+    always @(posedge clk) w4_q <= w4;
 
     reg        in_pkt, hwd, skp2;
     reg [10:0] skp_cnt;
@@ -55,7 +57,7 @@ module eerie_pl_tx_ml #(
                 n_s0[8*l +: 8] = K_COM; n_s1[8*l +: 8] = K_SKP; n_k0[l] = 1'b1; n_k1[l] = 1'b1;
             end
         end else if ((in_pkt || data_mode) && !pkt_rd_empty) begin
-            if (w4) begin
+            if (w4_q) begin
                 for (l = 0; l < 4 && l < N; l = l + 1) begin
                     n_s0[8*l +: 8] = byte_of(pd, l);
                     n_s1[8*l +: 8] = p_half ? 8'h00 : byte_of(pd, 4 + l);

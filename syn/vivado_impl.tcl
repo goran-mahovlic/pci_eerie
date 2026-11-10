@@ -50,7 +50,7 @@ switch $board {
                  set pins $here/ac7100b_pins.xdc; set generics {ENABLE_GEN2=1} }
   ac7100b_x4   { set part xc7a100tfgg484-2; set top top_ac7100b_x4
                  set files [concat [vivado_core ep] [list $repo/tb/eerie_tb_ep_ml.v $repo/tb/eerie_tb_app.v $here/eerie_host_app.v $here/top_ac7100b_x4.v]]
-                 set pins $here/ac7100b_x4.xdc; set timing {}; set bitstream 1 }
+                 set pins $here/ac7100b_x4_pins.xdc; set timing $here/ac7100b_x4_timing.xdc; set bitstream 1 }
   ypcb_k480t_rp { set part xc7k480tffg1156-2; set top top_ypcb_k480t_rp
                  set files [concat [vivado_core rp] [list $here/eerie_host_app.v $here/eerie_host_rp.v $here/top_ypcb_k480t_rp.v]]
                  set pins $here/ypcb_k480t_rp.xdc; set timing {}; set bitstream 1 }

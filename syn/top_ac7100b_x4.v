@@ -4,7 +4,7 @@
 // with pci_eerie in place of PCIE_2_1, and the 4 KB BAR0 memory app of the testbench.
 // LEDs: 0 user_lnk_up, 1..3 negotiated width (x1/x2/x4).
 // JTAG (eerie_jtag_bus, tools/eerie_host.tcl rd 300): any address reads
-// {16'd0, 4'd0, width[2:0], lnk_up, 2'd0, ltssm[5:0]}.
+// {21'd0, width[2:0], 1'b0, lnk_up, ltssm[5:0]} (width: PL initial link width code).
 `timescale 1ns / 1ps
 module top_ac7100b_x4 #(
     parameter LANES = 4
@@ -23,7 +23,7 @@ module top_ac7100b_x4 #(
     );
     wire req, we; wire [15:0] addr; wire [31:0] wdata; wire [31:0] ctl;
     reg  ack = 1'b0; reg [31:0] rdata = 32'd0;
-    always @(posedge uclk) begin ack <= req; rdata <= {20'd0, 1'b0, width, lnk_up, 1'b0, 2'd0, ltssm}; end
+    always @(posedge uclk) begin ack <= req; rdata <= {21'd0, width, 1'b0, lnk_up, ltssm}; end
     eerie_jtag_bus jtag (
         .clk(uclk), .req(req), .we(we), .addr(addr), .wdata(wdata), .rdata(rdata), .ack(ack),
         .aux({7'd0, lnk_up, 2'd0}), .ctl(ctl)

@@ -7,6 +7,7 @@
 #             enum            RP setup, CfgRd0 of 01:00.0, BAR sizing / assignment, memory enable,
 #                             NVMe controller registers (CAP, VS, CC, CSTS) if class 01:08:02
 #             rd <addr>  | wr <addr> <data>   raw register bus access (hex)
+#             poll <addr> <n>                 read n times, print changes
 #             mrd <addr> [n] | mwr <addr> <data>   32-bit memory read/write on the link (hex)
 #             cfgrd <bus:dev.fn> <reg>        configuration read (type 0 for bus 1, else type 1)
 set serial [lindex $argv 0]
@@ -177,6 +178,11 @@ switch $cmd {
     perst  { ctl 1; after 100; ctl 0; after 300; status }
     enum   { enum }
     rd     { puts [format %08x [rd [expr 0x[lindex $args 0]]]] }
+    poll   { set last -1; set t0 [clock milliseconds]
+             for {set i 0} {$i < [lindex $args 1]} {incr i} {
+                 set v [rd [expr 0x[lindex $args 0]]]
+                 if {$v != $last} { puts [format "%6d ms: %08x" [expr {[clock milliseconds] - $t0}] $v]; set last $v }
+             } }
     wr     { wr [expr 0x[lindex $args 0]] [expr 0x[lindex $args 1]] }
     ctl    { ctl [expr 0x[lindex $args 0]] }
     mrd    { foreach d [mrd [expr 0x[lindex $args 0]] [expr {[llength $args] > 1 ? [lindex $args 1] : 1}]] { puts [format %08x [regv $d]] } }
