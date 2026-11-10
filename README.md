@@ -58,10 +58,23 @@ expected link width and speed and moves MWr/MRd of 1..32 DW (every packet length
 | x1 / x2 EP into an x4 RP | | trains x1 / x2, pass | | x1: pass |
 | x8 EP build, x8 RP | trains x4, pass | | | |
 
+Root port test design (`tb/host_tb.v`, `sim/run_host.sh`): `syn/eerie_host_rp.v`, the Vivado root
+port core with pci_eerie inside plus the JTAG-driven test application `syn/eerie_host_app.v`,
+built x4 Gen2, against an x2 Gen2 endpoint (the shape of the Optane SSD of the K480T test below),
+driven through the application's register bus as `tools/eerie_host.tcl` does over JTAG: link,
+root port config space via `cfg_mgmt`, CfgRd0/CfgWr0 enumeration, BAR sizing and assignment,
+MWr32/MRd32 and a 4 DW burst through BAR0:
+
+| Root port pci_eerie (x4 Gen2) with | result |
+|------|------|
+| pci_eerie endpoint, x2 Gen2 | trains 5.0 GT/s x2, pass |
+| `PCIE_2_1` endpoint, x2 Gen2 | trains 5.0 GT/s x2, pass |
+
 The x1 tests above run unchanged on the multi-lane RTL. `tb/unit/ml_phy_tb.v` loops the
 multi-lane PHY (striper, per-lane TX/RX, deskew, framing) back without a GT model: 300 random
 TLPs and DLLPs at x2 and x4 with per-lane skew of 0..4 symbols and SKP symbols inserted / removed
-on one lane at every SKP ordered set (elastic buffer), all received intact.
+on one lane at every SKP ordered set (elastic buffer), all received intact; with `+badcrc` every
+fifth TLP carries a corrupted LCRC and exactly those are flagged bad.
 
 At Gen1, the decoded link traffic of the pio test is identical, TLP for TLP, to the
 `PCIE_2_1` reference run (`sim/ref/`).
@@ -98,6 +111,51 @@ build behaves the same), so each bitstream was loaded over JTAG and the host reb
 * openXC7, `Makefile.openxc7` (default `BOARD=ac7100b`, nextpnr estimate 127.9 MHz PIPE clock):
   3 of 3 program/reboot cycles enumerate and pass 50 x 256 DW. `BOARD=ac7100b_msi` (134.6 MHz):
   10 MSIs in 10 s received and handled.
+
+Multi-lane on hardware: the same Time Card, all four lanes (Time Card V9 schematic J37 and the
+AC7100B CON4 table: edge lane 0..3 = GTP quad 216 channel 1, 0, 2, 3; `syn/ac7100b_x4.xdc`).
+pcie_7x is x1-only, so the x4 build (`vivado_impl.tcl ac7100b_x4`, `syn/top_ac7100b_x4.v`) is the
+Vivado 7-series core of the root port example configured as an endpoint with pci_eerie in place
+of `PCIE_2_1` (as `tb/eerie_tb_ep_ml.v` in simulation; it needs `PCIE_EX` like the simulation)
+plus the testbench memory application, 125 MHz user clock. It trains 2.5 GT/s x4 (LnkCap and
+LnkSta x4 on both sides) and passes the BAR0 test (300 x 256 DW after the JTAG load and reboot;
+20-50 x 256 DW in each of 6 further boots once past the boot-time power management window below;
+no AER errors). xc7a100t-2 (the AC7100B part): 125 MHz PIPE clock +0.45 ns, user clock +0.56 ns;
+a -1 build misses the PIPE clock by 1.2 ns.
+
+On this host, BAR0 tests run in the first ~15 s after boot can fail (all-ones reads): the
+`powertop --auto-tune` boot service sets runtime PM to `auto`, the kernel runtime-suspends the
+driverless function and restores its saved Command register (0, memory decoding off) when it
+resumes it (`power/runtime_suspended_time` > 0). Running the test later, or writing `on` to the
+device's `power/control`, avoids it; this is not related to the core, and is likely the cause of
+the occasional all-ones reads noted for the x1 builds above.
+
+Root port on hardware (prepared, not run yet): `vivado_impl.tcl ypcb_k480t_rp` builds the K480T
+card as an x4 Gen2 root port (`syn/top_ypcb_k480t_rp.v`, lanes 0-3 = GTX quad 116 channel 3..0 as
+in the [YPCB hack](https://github.com/TiferKing/ypcb_00338_1p1_hack) constraints) for a PCIe x8
+female to M.2 adapter (PUZHI PZ-SSD) with an Intel Optane 16 GB (Gen3 x2, so the expected link is
+5.0 GT/s x2). Clocking and reset as in LiteNVMe's root port bench: the adapter's on-board 100 MHz
+oscillator is taken to feed REFCLK on the edge connector (the card's usual GTX reference clock
+input; if the adapter only clocks the M.2 slot, the design gets no PIPE/user clock, which
+`tools/eerie_host.tcl status` shows as a stopped user clock heartbeat), and the FPGA drives
+PERST# on the edge connector as an output (low for 100 ms after configuration, then released;
+`perst` pulses it again). The 50 MHz board oscillator runs the reset sequencing, so it works
+without the reference clock. Everything is controlled over JTAG through a BSCANE2 USER1
+register bridge (`eerie_jtag_bus`) with Vivado's raw JTAG commands:
+
+```
+vivado -mode batch -source tools/prog.tcl -tclargs syn/build_ypcb_k480t_rp_xc7k480tffg1156-2/top.bit <cable serial>
+vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> status   # LTSSM, width, speed, clocks
+vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> enum     # enumerate 01:00.0, NVMe CAP/VS/CSTS
+vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> mrd 10000008  # one MRd32
+```
+
+The x4 Gen2 root port runs its 64-bit user interface at 125 MHz: enough for the x2 link the SSD
+trains, half of what an x4 Gen2 partner could send (that needs 250 MHz or a 128-bit path).
+Timing (xc7k480t-2): 125 MHz PIPE clock +3.06 ns, user clock +2.45 ns, but the 250 MHz PIPE clock
+misses by 0.93 ns (108 endpoints: the multi-lane receive framing's LCRC state loop, deskew, and
+paths into the Vivado core's PIPE lanes), so 5.0 GT/s x2/x4 is not timing-clean yet;
+`ypcb_k480t_rp_gen1` builds the same design for 2.5 GT/s only.
 
 Timing (Vivado 2023.2, the pcie_7x board top with pci_eerie, `syn/vivado_impl.tcl`):
 
@@ -187,9 +245,13 @@ sim/ref/             decoded reference traces / config dumps of the PCIE_2_1 run
                      root port: rp_cfg_dump_hard.txt)
 syn/                 Vivado implementation script (vivado_impl.tcl), board pin and timing
                      constraints, openXC7 Makefile, top_ypcb_k480t.v (K480T top for openXC7)
+                     top_ac7100b_x4.v (Time Card x4 endpoint), eerie_host_rp.v + eerie_host_app.v +
+                     top_ypcb_k480t_rp.v (root port test design: Vivado core, JTAG TLP engine)
 tools/pipe_decode.py PIPE trace decoder (descrambles, frames, checks CRCs)
 tools/gen_ports.py   regenerates rtl/pci_eerie_ports.vh / _params.vh from the unisim model
 tools/fasm_canon.py  FASM canonicalizer used by the openXC7 flow
+tools/prog.tcl       JTAG programming (Vivado; selects the cable by serial)
+tools/eerie_host.tcl JTAG control of the root port test design (raw JTAG, BSCANE2 USER1)
 ext/pcie_7x          pcie_7x (git submodule)
 ```
 
@@ -241,6 +303,8 @@ sim/regress.sh                              # full regression (the 9 runs in the
 sim/regress.sh "GEN2=1 pio_writeReadBack_test0" "APP=1 eerie_mem_test"   # chosen runs
 sim/regress.sh "RP=eerie CFG=baseline APP=1 eerie_mem_test"              # CFG=: endpoint core
 sim/regress.sh rp baseline                 # root port regression (11 runs), PCIE_2_1 endpoint
+sim/run_host.sh [eerie|baseline]           # root port test design (x4 Gen2) vs an x2 Gen2 endpoint
+PLUSARGS="-testplusarg badcrc" tb/unit/run_ml_phy.sh 4    # every 5th TLP with a bad LCRC, must be flagged
 ```
 
 The endpoint side is `baseline` (`PCIE_2_1` in pcie_7x) or `eerie`. `RP=eerie` builds the root
@@ -319,7 +383,10 @@ Multi-lane (x2, x4): per-lane receiver detection, polarity and ordered sets, lin
 negotiation as upstream and downstream port (the lanes that keep up in Polling and echo the link
 number; partner lanes beyond the width get PAD lane numbers), down-training to x2 / x1, lane
 deskew (SKP removal per lane, alignment on COM), x2/x4 framing and striping, lanes outside the
-link in electrical idle.
+link in electrical idle. The receive framing handles two DWs per PIPE clock in three stages (DW
+assembly; symbol decode into per-DW roles; data path): the LCRC is linear, so the data terms of
+each DW are computed a stage early and the state update is a flat XOR of the registered state,
+and the residue is compared when the entry leaves the output queue.
 
 Not supported yet: lane reversal; x8 (an x8 build trains to x4: x8 Gen2 needs 16 bytes per
 clock, a 128-bit DLL / TL / TRN); initiating L0s/L1/L2 (the core never enters ASPM or

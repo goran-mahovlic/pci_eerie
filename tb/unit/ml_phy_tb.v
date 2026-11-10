@@ -39,6 +39,8 @@ module ml_phy_tb;
             put_word(i + 4 >= bn, i + 8 >= bn, i == 0, d);
         end
     end endtask
+    reg exp_bad [0:4095]; reg badcrc = 0; integer nbad = 0;
+    initial badcrc = $test$plusargs("badcrc");
     task send_tlp; input integer ndw; input [11:0] seq; integer i; reg [31:0] c, dw, lc; begin
         bn = 0;
         bs[bn] = 8'hFB; bn = bn + 1; bs[bn] = {4'h0, seq[11:8]}; bn = bn + 1; bs[bn] = seq[7:0]; bn = bn + 1;
@@ -52,6 +54,8 @@ module ml_phy_tb;
             bs[bn] = dw[31:24]; bs[bn+1] = dw[23:16]; bs[bn+2] = dw[15:8]; bs[bn+3] = dw[7:0]; bn = bn + 4;
         end
         lc = f_lcrc_field(c);
+        exp_bad[exp_n - 1] = badcrc && (exp_n % 5 == 2);    // +badcrc: corrupt every 5th LCRC
+        if (exp_bad[exp_n - 1]) lc[exp_n % 32] = !lc[exp_n % 32];
         bs[bn] = lc[31:24]; bs[bn+1] = lc[23:16]; bs[bn+2] = lc[15:8]; bs[bn+3] = lc[7:0]; bn = bn + 4;
         bs[bn] = 8'hFD; bn = bn + 1;
         flush_bytes;
@@ -150,7 +154,8 @@ module ml_phy_tb;
             cur[cn] = m_wd[63:32]; cur[cn+1] = m_wd[31:0]; cn = cn + 2;
         end else begin                            // end marker
             if (m_wd[81]) begin cur[cn] = m_wd[63:32]; cn = cn + 1; end
-            if (m_wd[79] || m_wd[80]) begin $display("[%0t] ERR TLP %0d flagged bad=%0d null=%0d (%0d DW)", $time, pk, m_wd[79], m_wd[80], exp_len[pk]); errs = errs + 1; end
+            if (m_wd[79] && exp_bad[pk] && !m_wd[80]) nbad = nbad + 1;
+            else if (m_wd[79] || m_wd[80] || exp_bad[pk]) begin $display("[%0t] ERR TLP %0d flagged bad=%0d null=%0d exp_bad=%0d (%0d DW)", $time, pk, m_wd[79], m_wd[80], exp_bad[pk], exp_len[pk]); errs = errs + 1; end
             if (exp_dllp[pk] || cn != exp_len[pk]) begin
                 $display("[%0t] ERR TLP %0d length %0d exp %0d", $time, pk, cn, exp_len[pk]); errs = errs + 1;
             end else for (k = 0; k < cn; k = k + 1) if (cur[k] !== exp_dw[rd + k]) begin
@@ -172,6 +177,7 @@ module ml_phy_tb;
         wait (fr == fw);
         repeat (200) @(posedge clk);
         $display("lane 1 elastic SKP insertions/removals: %0d", lane[1].nel);
+        if (badcrc) $display("bad LCRC TLPs flagged: %0d", nbad);
         $display("ml_phy_tb W=%0d skew=%h: %0d packets checked of %0d, %0d errors -> %s", W, SKEW, pk, exp_n, errs,
                  (errs == 0 && pk == exp_n) ? "PASS" : "FAIL");
         $finish;

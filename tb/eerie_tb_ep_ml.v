@@ -5,8 +5,12 @@
 `timescale 1ns / 1ps
 module eerie_tb_ep_ml #(
     parameter LANES       = 1,
-    parameter ENABLE_GEN2 = 0
+    parameter ENABLE_GEN2 = 0,
+    // hardware builds (syn/top_ac7100b_x4.v): GT type and no fast training
+    parameter GT_DEVICE   = "GTX",
+    parameter FAST_TRAIN  = "TRUE"
 ) (
+    output user_clk_o, output user_lnk_up_o, output [5:0] ltssm_o, output [2:0] width_o,
     output [LANES-1:0] pci_exp_txp, output [LANES-1:0] pci_exp_txn,
     input  [LANES-1:0] pci_exp_rxp, input  [LANES-1:0] pci_exp_rxn,
     input  sys_clk_p,   input  sys_clk_n,
@@ -34,7 +38,9 @@ module eerie_tb_ep_ml #(
     wire        cfg_interrupt, cfg_interrupt_assert;
 
     pcie_2_1_ep_7x #(
-        .PL_FAST_TRAIN("TRUE"), .C_DATA_WIDTH(64),
+        .PL_FAST_TRAIN(FAST_TRAIN), .C_DATA_WIDTH(64),
+        .PCIE_GT_DEVICE(GT_DEVICE), .PCIE_USE_MODE(GT_DEVICE == "GTP" ? "1.0" : "3.0"),
+        .PCIE_CHAN_BOND(GT_DEVICE == "GTP" ? 1 : 0),
         .LINK_CAP_MAX_LINK_WIDTH(LANES), .LTSSM_MAX_LINK_WIDTH(LANES),
         .LINK_CAP_MAX_LINK_SPEED(ENABLE_GEN2 ? 4'h2 : 4'h1), .LINK_CTRL2_TARGET_LINK_SPEED(ENABLE_GEN2 ? 4'h2 : 4'h1),
         .USER_CLK_FREQ(UCF),
@@ -104,8 +110,8 @@ module eerie_tb_ep_ml #(
         .cfg_msg_received_deassert_int_c(), .cfg_msg_received_deassert_int_d(),
         .pl_directed_link_change(2'b00), .pl_directed_link_speed(1'b0), .pl_directed_link_width(2'b00),
         .pl_directed_link_auton(1'b0), .pl_upstream_prefer_deemph(1'b1), .pl_sel_lnk_rate(), .pl_sel_lnk_width(),
-        .pl_ltssm_state(), .pl_lane_reversal_mode(), .pl_phy_lnk_up(), .pl_tx_pm_state(), .pl_rx_pm_state(),
-        .pl_link_upcfg_cap(), .pl_link_gen2_cap(), .pl_link_partner_gen2_supported(), .pl_initial_link_width(),
+        .pl_ltssm_state(ltssm_o), .pl_lane_reversal_mode(), .pl_phy_lnk_up(), .pl_tx_pm_state(), .pl_rx_pm_state(),
+        .pl_link_upcfg_cap(), .pl_link_gen2_cap(), .pl_link_partner_gen2_supported(), .pl_initial_link_width(width_o),
         .pl_directed_change_done(), .pl_received_hot_rst(), .pl_downstream_deemph_source(1'b0),
         .pl_transmit_hot_rst(1'b0),
         .cfg_err_aer_headerlog(128'b0), .cfg_aer_interrupt_msgnum(5'b0), .cfg_err_aer_headerlog_set(),
@@ -117,6 +123,7 @@ module eerie_tb_ep_ml #(
         .pipe_mmcm_rst_n(1'b1), .sys_clk(sys_clk), .sys_rst_n(sys_rst_n)
     );
 
+    assign user_lnk_up_o = user_lnk_up; assign user_clk_o = user_clk;
     eerie_tb_app app (
         .user_clk(user_clk), .user_reset(user_reset),
         .s_axis_tx_tready(s_axis_tx_tready), .s_axis_tx_tdata(s_axis_tx_tdata), .s_axis_tx_tkeep(s_axis_tx_tkeep),

@@ -28,9 +28,24 @@ module eerie_tb_app (
     always @(posedge user_clk) user_reset_q <= user_reset;
 
     // ---------------------------------------------------------------- memory
-    reg [31:0] mem [0:1023];
+    // even / odd DW banks with one write port each (distributed RAM in hardware builds)
+    reg [31:0] mem_e [0:511];
+    reg [31:0] mem_o [0:511];
     integer mi;
-    initial for (mi = 0; mi < 1024; mi = mi + 1) mem[mi] = 32'h0;
+    initial for (mi = 0; mi < 512; mi = mi + 1) begin mem_e[mi] = 32'h0; mem_o[mi] = 32'h0; end
+    reg        we_a, we_b;          // write port A (first DW) and B (second DW of a beat)
+    reg [9:0]  wa_a, wa_b;
+    reg [31:0] wd_a, wd_b;
+    wire       we_e = (we_a && !wa_a[0]) || (we_b && !wa_b[0]);
+    wire       we_o = (we_a &&  wa_a[0]) || (we_b &&  wa_b[0]);
+    wire [9:0] wa_e = (we_a && !wa_a[0]) ? wa_a : wa_b;
+    wire [9:0] wa_o = (we_a &&  wa_a[0]) ? wa_a : wa_b;
+    wire [31:0] wd_e = (we_a && !wa_a[0]) ? wd_a : wd_b;
+    wire [31:0] wd_o = (we_a &&  wa_a[0]) ? wd_a : wd_b;
+    always @(posedge user_clk) begin
+        if (we_e) mem_e[wa_e[9:1]] <= wd_e;
+        if (we_o) mem_o[wa_o[9:1]] <= wd_o;
+    end
 
     // ---------------------------------------------------------------- RX
     // AXI 7-series format: tdata[31:0] = first DW, [63:32] = second DW
@@ -43,9 +58,10 @@ module eerie_tb_app (
     reg        rd_busy;
     always @(posedge user_clk) begin
         if (user_reset_q) begin
-            rx_in <= 1'b0; rd_req <= 1'b0; irq_req <= 1'b0;
+            rx_in <= 1'b0; rd_req <= 1'b0; irq_req <= 1'b0; we_a <= 1'b0; we_b <= 1'b0;
         end else begin
             if (rd_req && rd_busy) rd_req <= 1'b0;
+            we_a <= 1'b0; we_b <= 1'b0;
             if (m_axis_rx_tvalid) begin
                 if (!rx_in) begin
                     // beat 0: DW0, DW1
@@ -58,7 +74,7 @@ module eerie_tb_app (
                         if (!rx_4dw) begin
                             rx_addr <= d_lo[11:2] + 1'b1;
                             if (rx_wr) begin
-                                mem[d_lo[11:2]] <= d_hi;
+                                we_a <= 1'b1; wa_a <= d_lo[11:2]; wd_a <= d_hi;
                                 if (d_lo[11:2] == 10'h3FC) begin irq_req <= 1'b1; irq_val <= d_hi[24]; end
                             end else if (h0[28:24] == 5'b00000) begin
                                 rd_req <= 1'b1; rd_h0 <= h0; rd_h1 <= h1; rd_addr <= d_lo[11:2];
@@ -70,8 +86,8 @@ module eerie_tb_app (
                             end
                         end
                     end else if (rx_wr && h0[28:24] == 5'b00000) begin
-                        mem[rx_addr] <= d_lo;
-                        if (m_axis_rx_tkeep[4]) mem[rx_addr + 1'b1] <= d_hi;
+                        we_a <= 1'b1; wa_a <= rx_addr; wd_a <= d_lo;
+                        we_b <= m_axis_rx_tkeep[4]; wa_b <= rx_addr + 1'b1; wd_b <= d_hi;
                         if (rx_addr == 10'h3FC) begin irq_req <= 1'b1; irq_val <= d_lo[24]; end
                         rx_addr <= rx_addr + 2'd2;
                     end
@@ -85,6 +101,9 @@ module eerie_tb_app (
     // ---------------------------------------------------------------- TX (completions)
     reg [9:0]  c_len, c_left;
     reg [9:0]  c_addr;
+    // asynchronous reads: DW c_addr and c_addr + 1 (one from each bank)
+    wire [9:0]  c_addr1 = c_addr + 1'b1;
+    wire [31:0] e_c = mem_e[c_addr[9:1]], o_c = mem_o[c_addr[9:1]], e_c1 = mem_e[c_addr1[9:1]];
     reg [1:0]  c_st;
     reg        c_odd;
     wire [15:0] cid = {cfg_bus_number, cfg_device_number, cfg_function_number};
@@ -107,13 +126,13 @@ module eerie_tb_app (
             end
             2'd1: if (s_axis_tx_tready) begin
                 // DW2 requester/tag/lower address, DW3 first data
-                s_axis_tx_tdata <= {mem[c_addr], rd_h1[31:16], rd_h1[15:8], 1'b0, c_addr[4:0], 2'b00};
+                s_axis_tx_tdata <= {c_addr[0] ? o_c : e_c, rd_h1[31:16], rd_h1[15:8], 1'b0, c_addr[4:0], 2'b00};
                 s_axis_tx_tlast <= (c_len == 10'd1);
                 c_addr <= c_addr + 1'b1; c_left <= c_len - 1'b1;
                 c_st <= (c_len == 10'd1) ? 2'd3 : 2'd2;
             end
             2'd2: if (s_axis_tx_tready) begin
-                s_axis_tx_tdata <= {mem[c_addr + 1'b1], mem[c_addr]};
+                s_axis_tx_tdata <= (c_addr[0] ? {e_c1, o_c} : {o_c, e_c});
                 s_axis_tx_tkeep <= (c_left == 10'd1) ? 8'h0F : 8'hFF;
                 s_axis_tx_tlast <= (c_left <= 10'd2);
                 c_addr <= c_addr + 2'd2;
