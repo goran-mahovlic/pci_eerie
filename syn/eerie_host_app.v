@@ -9,6 +9,9 @@
 //   0x0200         R   RX: [9:0] beats captured, bit 16 overflow, [31:24] TLPs captured;  W: clear
 //   0x0300         R   status (see below)
 //   0x0301         R   free-running user_clk counter
+//   0x0303         R   LTSSM trace: [5:0] entries written (64 max, then stops), [13:8] highest state seen
+//   0x2000-0x203F  R   LTSSM trace entries: [5:0] state entered, [31:8] user_clk counter / 64 at entry
+//                      (cleared by writing 0x0303)
 //   0x0302         R/W PL control: [1:0] directed_link_change, [3:2] directed_link_width,
 //                      [4] directed_link_speed, [5] directed_link_auton, [6] transmit_hot_rst
 //   0x0400         W   cfg_mgmt dword address [9:0]
@@ -138,11 +141,30 @@ module eerie_host_app (
         else if (req && we && addr == 16'h0302) pl_ctl <= wdata[6:0];
     end
 
+    // ---------------------------------------------------------------- LTSSM trace (status[7:2])
+    // not reset by rst: the interesting part happens while the link is down
+    reg [31:0] tr [0:63];
+    reg [6:0]  tr_n = 7'd0;
+    reg [5:0]  tr_last = 6'h3F, tr_max = 6'd0;
+    wire [5:0] lt = status[7:2];
+    always @(posedge clk) begin
+        if (req && we && addr == 16'h0303) begin tr_n <= 7'd0; tr_max <= 6'd0; tr_last <= 6'h3F; end
+        else if (lt != tr_last) begin
+            tr_last <= lt;
+            if (lt > tr_max) tr_max <= lt;
+            if (!tr_n[6]) begin tr[tr_n[5:0]] <= {ucnt[29:6], 2'b00, lt}; tr_n <= tr_n + 1'b1; end
+        end
+    end
+    reg [31:0] tr_q;
+    always @(posedge clk) tr_q <= tr[addr[5:0]];
+
     // ---------------------------------------------------------------- read mux (one cycle after req)
+    // TX, RX capture, cfg_mgmt and PL control are reset by rst; the bus itself is not
     reg        req_q;
     reg [15:0] addr_q;
     always @(posedge clk) begin
-        req_q <= req && !rst; addr_q <= addr; ack <= req_q;
+        // not held by rst (the core's user_reset, asserted while the link is down): status stays readable
+        req_q <= req; addr_q <= addr; ack <= req_q;
         if (req_q) begin
             casez (addr_q)
             16'h0100: rdata <= {tx_cnt, 15'd0, tx_busy};
@@ -150,10 +172,12 @@ module eerie_host_app (
             16'h0300: rdata <= status;
             16'h0301: rdata <= ucnt;
             16'h0302: rdata <= {25'd0, pl_ctl};
+            16'h0303: rdata <= {18'd0, tr_max, 1'b0, tr_n};
             16'h0402: rdata <= {30'd0, cm_to, cm_busy};
             16'h0403: rdata <= cm_do;
             16'b0001_00??_????_????: rdata <= addr_q[0] ? rx_hi_q : rx_lo_q;
             16'b0001_100?_????_????: rdata <= {22'd0, rx_fl_q};
+            16'b0010_0000_00??_????: rdata <= tr_q;
             default:  rdata <= 32'hDEAD_0000 | addr_q;
             endcase
         end

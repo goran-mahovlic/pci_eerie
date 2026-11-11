@@ -3,6 +3,9 @@
 # register bus of syn/eerie_host_app.v through the BSCANE2 USER1 data register (eerie_jtag_bus).
 # usage: vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial|-> <command> [args]
 #   commands: status          link / LTSSM / clocks
+#             trace [clear]   LTSSM state changes since the last clear (64 kept), highest state
+#             clocks          sample the user clock and 50 MHz heartbeats (is the reference clock there?)
+#             ctl <hex>       JTAG-side control: bit 0 PERST# low, 1 core reset, 2 PERST# driven high
 #             perst           pulse PERST# (100 ms low ... released 100 ms later) and retrain
 #             enum            RP setup, CfgRd0 of 01:00.0, BAR sizing / assignment, memory enable,
 #                             NVMe controller registers (CAP, VS, CC, CSTS) if class 01:08:02
@@ -49,8 +52,8 @@ proc aux {} { return [lindex [dr 0 0 0 0] 2] }
 
 proc status {} {
     set a [aux]
-    puts [format "aux: PERST#=%d core_rst_n=%d user_lnk_up=%d (heartbeats user %d clk_50 %d)" \
-        [expr {$a & 1}] [expr {($a >> 1) & 1}] [expr {($a >> 2) & 1}] [expr {($a >> 3) & 1}] [expr {($a >> 4) & 1}]]
+    puts [format "aux: PERST# released=%d (pin level %d) core_rst_n=%d user_lnk_up=%d (heartbeats user %d clk_50 %d)" \
+        [expr {$a & 1}] [expr {($a >> 5) & 1}] [expr {($a >> 1) & 1}] [expr {($a >> 2) & 1}] [expr {($a >> 3) & 1}] [expr {($a >> 4) & 1}]]
     if {[catch {set s [rd 0x0300]} e]} { puts "status: $e"; return }
     set iw [expr {($s >> 11) & 7}]
     puts [format "status %08x: user_lnk_up %d phy_lnk_up %d LTSSM 0x%02x, %s x%d (initial x%s), partner Gen2 %d, LnkSta %d GT/s-code x%d, messages %d" \
@@ -175,6 +178,16 @@ proc cfgwrv {reg v} { cfgwr [bdf 01:00.0] $reg [regv $v] }
 jtag_open $serial
 switch $cmd {
     status { status }
+    trace  { set t [rd 0x0303]; set n [expr {$t & 0x7F}]
+             puts [format "LTSSM trace: %d entries, highest state 0x%02x" $n [expr {($t >> 8) & 0x3F}]]
+             set p 0
+             for {set i 0} {$i < $n} {incr i} { set e [rd [expr {0x2000 + $i}]]; set ts [expr {($e >> 8) * 64}]
+                 puts [format "  %10.3f us (+%9.3f)  0x%02x" [expr {$ts / 125.0}] [expr {($ts - $p) / 125.0}] [expr {$e & 0x3F}]]; set p $ts }
+             if {[llength $args] > 0} { wr 0x0303 0 } }
+    clocks { set tu 0; set t5 0; set a0 [aux]
+             for {set i 0} {$i < 40} {incr i} { after 50; set a [aux]
+                 if {(($a ^ $a0) >> 3) & 1} { incr tu }; if {(($a ^ $a0) >> 4) & 1} { incr t5 }; set a0 $a }
+             puts "heartbeat toggles in 2 s: user clock $tu, clk_50 $t5 (expected about 7 and 3)" }
     perst  { ctl 1; after 100; ctl 0; after 300; status }
     enum   { enum }
     rd     { puts [format %08x [rd [expr 0x[lindex $args 0]]]] }

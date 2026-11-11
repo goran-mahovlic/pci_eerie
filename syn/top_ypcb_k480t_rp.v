@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: CERN-OHL-P
 // YPCB K480T as a PCIe root port (pci_eerie in the Vivado 7-series root port core), e.g. into an
 // M.2 SSD through a PCIe x8 female to M.2 adapter that supplies the 100 MHz reference clock
-// on the edge connector. The FPGA drives PERST# (the edge connector's PERST# pin, an output
-// here): low for 100 ms after configuration, then high. Controlled over JTAG (eerie_jtag_bus,
-// see tools/eerie_host.tcl): ctl bit 0 forces PERST# low, ctl bit 1 holds the core in reset.
+// on the edge connector. The FPGA controls PERST# (the edge connector's PERST# pin): low for
+// 100 ms after configuration, then released. Controlled over JTAG (eerie_jtag_bus,
+// see tools/eerie_host.tcl): ctl bit 0 forces PERST# low, ctl bit 1 holds the core in reset,
+// ctl bit 2 drives PERST# high when released (default: released = high-Z).
 // LEDs: 0 user_lnk_up, 1 PERST# released, 2 user clock heartbeat.
 `timescale 1ns / 1ps
 module top_ypcb_k480t_rp #(
@@ -14,7 +15,7 @@ module top_ypcb_k480t_rp #(
     output [LANES-1:0] pci_exp_txp, output [LANES-1:0] pci_exp_txn,
     input  [LANES-1:0] pci_exp_rxp, input  [LANES-1:0] pci_exp_rxn,
     input  sys_clk_p, input sys_clk_n,
-    output perst_n,
+    inout  perst_n,
     input  clk_50,
     output [2:0] led
 );
@@ -33,7 +34,12 @@ module top_ypcb_k480t_rp #(
         perst_q    <= (por == 23'd5_000_000) && !ctl_s1[0];
         core_rst_n <= (por >= 23'd50_000 || core_rst_n) && !ctl_s1[1];
     end
-    assign perst_n = perst_q;
+    // PERST#: asserted = driven low; released = open (high-Z, an adapter pull-up pulls it high), or
+    // driven high with ctl bit 2. perst_in: the pin's level, for diagnosis
+    wire perst_in;
+    (* ASYNC_REG = "TRUE" *) reg [1:0] ctl2_s = 2'b00;
+    always @(posedge clk_50) ctl2_s <= {ctl2_s[0], ctl[2]};
+    IOBUF perst_buf (.IO(perst_n), .I(perst_q), .T(perst_q && !ctl2_s[1]), .O(perst_in));
     reg [24:0] hb50 = 25'd0;
     always @(posedge clk_50) hb50 <= hb50 + 1'b1;
 
@@ -49,7 +55,7 @@ module top_ypcb_k480t_rp #(
 
     eerie_jtag_bus jtag (
         .clk(user_clk), .req(req), .we(we), .addr(addr), .wdata(wdata), .rdata(rdata), .ack(ack),
-        .aux({5'd0, hb50[24], hbu[25], lnk_up, core_rst_n, perst_q}), .ctl(ctl)
+        .aux({4'd0, perst_in, hb50[24], hbu[25], lnk_up, core_rst_n, perst_q}), .ctl(ctl)
     );
     // LEDs (active low as in top_ypcb_k480t)
     assign led = ~{hbu[25], perst_q, lnk_up};
