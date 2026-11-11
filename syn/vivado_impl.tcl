@@ -8,7 +8,8 @@
 #          ac7100b_x4   same board, x4 Gen1: Vivado 7-series core with pci_eerie (syn/top_ac7100b_x4.v;
 #                       needs the root port example imports, PCIE_EX as sim/run.sh)
 #          ypcb_k480t_rp YPCB K480T root port x4 Gen2 (syn/top_ypcb_k480t_rp.v, JTAG host bridge;
-#                       tools/eerie_host.tcl), same PCIE_EX requirement; ypcb_k480t_rp_gen1: x4 Gen1
+#                       tools/eerie_host.tcl), same PCIE_EX requirement; ypcb_k480t_rp_gen1: x4 Gen1;
+#                       ypcb_k480t_rp_pzssd[_gen1]: lanes reversed for the PUZHI PZ-SSD M.2 adapter
 #          hvs_k70t     HVS K70T (xc7k70t, GTX), Gen2         pcie_7x_top_aximm_hvs_70t
 #          ypcb_k480t   YPCB K480T (xc7k480t, GTX), Gen2      pcie_7x_top_aximm_ypcb_480t (writes top.bit)
 #          ypcb_k480t_gen1  same board, Gen1                  syn/top_ypcb_k480t.v (as the openXC7 build)
@@ -29,6 +30,17 @@ proc vivado_core {kind} {
   if {$kind eq "ep"} { set e "s/\\brp_(\[A-Za-z0-9_\]+)\\b/ep_\\1/g; s/\\bpcie_2_1_rport_7x\\b/pcie_2_1_ep_7x/g; $e"; set o pcie_2_1_ep_7x_eerie.v
   } else { set o pcie_2_1_rport_7x_eerie.v }
   exec sed -E $e $ex/pcie_2_1_rport_7x.v > $here/build_core_gen/$o
+  if {$kind eq "rp"} {
+    # bring pci_eerie's DBGVECA[49:0] (bring-up status) out of the core top through the unused
+    # pipe_tx_0_sigs / pipe_tx_1_sigs outputs (top module only, i.e. before the first endmodule)
+    exec sed -E -i {1,/^endmodule/ {
+      s/^  rp_pcie_top # \(/  wire [63:0] dbg_vec_a_w;\n  rp_pcie_top # (/
+      s/^(\s*)\.dbg_vec_a(\s*)\( \),/\1.dbg_vec_a\2( dbg_vec_a_w ),/
+      s/^(\s*)assign  pipe_tx_0_sigs      = 25'b0;/\1assign  pipe_tx_0_sigs      = dbg_vec_a_w[24:0];/
+      s/^(\s*)assign  pipe_tx_1_sigs      = 25'b0;/\1assign  pipe_tx_1_sigs      = dbg_vec_a_w[49:25];/
+    }} $here/build_core_gen/$o
+    if {[exec grep -c {dbg_vec_a_w} $here/build_core_gen/$o] != 6} { error "DBGVECA export patch did not apply" }
+  }
   if {[exec grep -c {^\s*pci_eerie #(} $here/build_core_gen/$o] != 1} { error "PCIE_2_1 instance not found in $o" }
   return [list $here/build_core_gen/$o]
 }
@@ -54,6 +66,11 @@ switch $board {
   ypcb_k480t_rp { set part xc7k480tffg1156-2; set top top_ypcb_k480t_rp
                  set files [concat [vivado_core rp] [list $here/eerie_host_app.v $here/eerie_host_rp.v $here/top_ypcb_k480t_rp.v]]
                  set pins $here/ypcb_k480t_rp.xdc; set timing {}; set bitstream 1 }
+  ypcb_k480t_rp_pzssd - ypcb_k480t_rp_pzssd_gen1 {
+                 set part xc7k480tffg1156-2; set top top_ypcb_k480t_rp
+                 if {$board eq "ypcb_k480t_rp_pzssd_gen1"} { set generics {ENABLE_GEN2=0} }
+                 set files [concat [vivado_core rp] [list $here/eerie_host_app.v $here/eerie_host_rp.v $here/top_ypcb_k480t_rp.v]]
+                 set pins $here/ypcb_k480t_rp_pzssd.xdc; set timing {}; set bitstream 1 }
   ypcb_k480t_rp_gen1 { set part xc7k480tffg1156-2; set top top_ypcb_k480t_rp; set generics {ENABLE_GEN2=0}
                  set files [concat [vivado_core rp] [list $here/eerie_host_app.v $here/eerie_host_rp.v $here/top_ypcb_k480t_rp.v]]
                  set pins $here/ypcb_k480t_rp.xdc; set timing {}; set bitstream 1 }

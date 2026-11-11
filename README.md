@@ -130,32 +130,61 @@ resumes it (`power/runtime_suspended_time` > 0). Running the test later, or writ
 device's `power/control`, avoids it; this is not related to the core, and is likely the cause of
 the occasional all-ones reads noted for the x1 builds above.
 
-Root port on hardware (prepared, not run yet): `vivado_impl.tcl ypcb_k480t_rp` builds the K480T
-card as an x4 Gen2 root port (`syn/top_ypcb_k480t_rp.v`, lanes 0-3 = GTX quad 116 channel 3..0 as
-in the [YPCB hack](https://github.com/TiferKing/ypcb_00338_1p1_hack) constraints) for a PCIe x8
-female to M.2 adapter (PUZHI PZ-SSD) with an Intel Optane 16 GB (Gen3 x2, so the expected link is
-5.0 GT/s x2). Clocking and reset as in LiteNVMe's root port bench: the adapter's on-board 100 MHz
-oscillator is taken to feed REFCLK on the edge connector (the card's usual GTX reference clock
-input; if the adapter only clocks the M.2 slot, the design gets no PIPE/user clock, which
-`tools/eerie_host.tcl status` shows as a stopped user clock heartbeat), and the FPGA drives
-PERST# on the edge connector as an output (low for 100 ms after configuration, then released;
-`perst` pulses it again). The 50 MHz board oscillator runs the reset sequencing, so it works
-without the reference clock. Everything is controlled over JTAG through a BSCANE2 USER1
-register bridge (`eerie_jtag_bus`) with Vivado's raw JTAG commands:
+Root port on hardware: the YPCB K480T card as an x4 root port (`syn/top_ypcb_k480t_rp.v`: the Vivado
+root port core with pci_eerie in place of `PCIE_2_1`, plus `syn/eerie_host_app.v`) plugged into a PUZHI
+PZ-SSD (PCIe x8 female to M.2 adapter) with an Intel Optane Memory 16 GB (8086:2522, NVMe, Gen3 x2),
+controlled over JTAG. Results with `vivado_impl.tcl ypcb_k480t_rp_pzssd` (x4 Gen2) and
+`ypcb_k480t_rp_pzssd_gen1`:
+
+* the link trains x2 (down-trained from x4) at 2.5 GT/s; the Gen2 build then changes it to 5.0 GT/s
+  by itself (L0, Recovery, back to L0 at 5.0 GT/s);
+* CfgRd0/CfgWr0 enumeration: vendor/device 8086:2522, class 01:08:02, PCIe capability LnkCap
+  8 GT/s x2 / LnkSta 2.5 or 5.0 GT/s x2, BAR0 16 KB 64-bit sized and assigned, memory and bus
+  master enabled;
+* NVMe registers through MRd32: CAP 0x000000200401007F (MQES 128, TO 2 s), VS 1.1.0, CC/CSTS 0;
+* MWr32 + MRd32 read-back of random values on the NVMe admin queue base registers (ASQ/ACQ,
+  controller disabled): 4000 pairs at 2.5 GT/s and 4000 pairs at 5.0 GT/s, no mismatches, no
+  Recovery entered during the test;
+* hot reset from the root port (`pl_transmit_hot_rst`), link retrains to 5.0 GT/s x2 and the SSD
+  enumerates again.
+
+Board / adapter findings:
+
+* REFCLK: the adapter's on-board 100 MHz oscillator drives REFCLK on the edge connector, so the
+  card's normal GTX reference clock input is used (as in LiteNVMe's root port bench).
+* Lane order: the adapter connects M.2 lanes 0..3 to edge lanes 3..0 (the x2 SSD was detected only
+  on edge lanes 2-3). pci_eerie has no lane reversal, so `syn/ypcb_k480t_rp_pzssd.xdc` places core
+  lane n on edge lane 3-n; `ypcb_k480t_rp` / `_gen1` keep the straight order for other slots.
+* PERST#: the FPGA controls the edge connector's PERST# pin (Y26; driven low, released as open
+  drain or driven high with ctl bit 2), and reads its level back, but the SSD does not see it: its
+  link stays up with PERST# held low for seconds. Either the card buffers that pin towards the FPGA
+  only or the adapter does not route it. The SSD is reset by the adapter's power-up; use the hot
+  reset (`wr 302 40`, `wr 302 0`) to reset it in band.
+* Power: the K480T needs 3.3 V on the edge connector (B8-B10) in addition to 12 V to start; on the
+  test bench a wire from the adapter's 3.3 V provides it.
+
+Commands (`tools/eerie_host.tcl`, Vivado batch mode; 2019.1 and 2023.2 both work):
 
 ```
-vivado -mode batch -source tools/prog.tcl -tclargs syn/build_ypcb_k480t_rp_xc7k480tffg1156-2/top.bit <cable serial>
-vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> status   # LTSSM, width, speed, clocks
-vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> enum     # enumerate 01:00.0, NVMe CAP/VS/CSTS
+vivado -mode batch -source tools/prog.tcl -tclargs syn/build_ypcb_k480t_rp_pzssd_xc7k480tffg1156-2/top.bit <cable serial>
+vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> status    # LTSSM, width, speed, PERST#
+vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> enum      # enumerate 01:00.0, NVMe CAP/VS/CSTS
+vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> regtest 1000   # ASQ/ACQ read-back
+vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> pipe      # per-lane receiver detection
+vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> trace     # LTSSM state changes
 vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial> mrd 10000008  # one MRd32
 ```
 
+`pipe` reads pci_eerie's `DBGVECA` (sticky per-lane RxElecIdle / RxValid / receiver detection /
+RxStatus), which `vivado_impl.tcl` brings out of the root port core through its unused
+`pipe_tx_0/1_sigs` outputs; `trace` is a 64-entry LTSSM transition log in the test application.
+
 The x4 Gen2 root port runs its 64-bit user interface at 125 MHz: enough for the x2 link the SSD
 trains, half of what an x4 Gen2 partner could send (that needs 250 MHz or a 128-bit path).
-Timing (xc7k480t-2): 125 MHz PIPE clock +3.06 ns, user clock +2.45 ns, but the 250 MHz PIPE clock
-misses by 0.93 ns (108 endpoints: the multi-lane receive framing's LCRC state loop, deskew, and
-paths into the Vivado core's PIPE lanes), so 5.0 GT/s x2/x4 is not timing-clean yet;
-`ypcb_k480t_rp_gen1` builds the same design for 2.5 GT/s only.
+Timing (xc7k480t-2): 125 MHz PIPE clock +3.06 ns, user clock +2.68 ns, but the 250 MHz PIPE clock
+misses by 0.94 ns (the multi-lane receive framing's LCRC state loop, deskew, and paths into the
+Vivado core's PIPE lanes), so the 5.0 GT/s build is not timing-clean although it ran without errors
+on the bench; the Gen1 builds meet timing.
 
 Timing (Vivado 2023.2, the pcie_7x board top with pci_eerie, `syn/vivado_impl.tcl`):
 

@@ -3,6 +3,7 @@
 # register bus of syn/eerie_host_app.v through the BSCANE2 USER1 data register (eerie_jtag_bus).
 # usage: vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial|-> <command> [args]
 #   commands: status          link / LTSSM / clocks
+#             pipe            per-lane PIPE receive / receiver detection status (sticky)
 #             trace [clear]   LTSSM state changes since the last clear (64 kept), highest state
 #             clocks          sample the user clock and 50 MHz heartbeats (is the reference clock there?)
 #             ctl <hex>       JTAG-side control: bit 0 PERST# low, 1 core reset, 2 PERST# driven high
@@ -11,6 +12,7 @@
 #                             NVMe controller registers (CAP, VS, CC, CSTS) if class 01:08:02
 #             rd <addr>  | wr <addr> <data>   raw register bus access (hex)
 #             poll <addr> <n>                 read n times, print changes
+#             regtest [n]     NVMe ASQ/ACQ register write/read-back (after enum)
 #             mrd <addr> [n] | mwr <addr> <data>   32-bit memory read/write on the link (hex)
 #             cfgrd <bus:dev.fn> <reg>        configuration read (type 0 for bus 1, else type 1)
 set serial [lindex $argv 0]
@@ -138,9 +140,9 @@ proc enum {} {
     mgmt_wr 8 0x1FF01000                 ;# memory window 0x10000000-0x1FFFFFFF
     set v [cfgv 0]
     puts [format "01:00.0: vendor %04x device %04x" [expr {$v & 0xFFFF}] [expr {$v >> 16}]]
-    set cc [cfgv 2]
+    set cc [cfgv 0x08]
     puts [format "01:00.0: class %06x rev %02x" [expr {$cc >> 8}] [expr {$cc & 0xFF}]]
-    set hdr [cfgv 3]; puts [format "01:00.0: header type %02x" [expr {($hdr >> 16) & 0xFF}]]
+    set hdr [cfgv 0x0C]; puts [format "01:00.0: header type %02x" [expr {($hdr >> 16) & 0xFF}]]
     # capabilities: link status of the PCIe capability
     set p [expr {[cfgv 0x34] & 0xFF}]
     while {$p} {
@@ -159,7 +161,7 @@ proc enum {} {
     cfgwrv 0x10 0x10000000
     if {($m & 6) == 4} { cfgwrv 0x14 0 }
     cfgwrv 0x04 0x00000006
-    puts [format "01:00.0: command/status %08x, BAR0 %08x" [cfgv 4] [cfgv 0x10]]
+    puts [format "01:00.0: command/status %08x, BAR0 %08x" [cfgv 0x04] [cfgv 0x10]]
     if {($cc >> 8) == 0x010802} {
         set r [mrd 0x10000000 2]
         set cap [expr {([regv [lindex $r 1]] << 32) | [regv [lindex $r 0]]}]
@@ -178,6 +180,23 @@ proc cfgwrv {reg v} { cfgwr [bdf 01:00.0] $reg [regv $v] }
 jtag_open $serial
 switch $cmd {
     status { status }
+    regtest { # MWr/MRd read-back on the NVMe admin queue base registers (ASQ 0x28, ACQ 0x30; bits 11:0
+              # read as zero), controller disabled; BAR0 at 0x10000000 as set by enum
+              set n [expr {[llength $args] ? [lindex $args 0] : 20}]; set bad 0; expr {srand(1)}
+              for {set i 0} {$i < $n} {incr i} {
+                  foreach off {0x28 0x2C 0x30 0x34} {
+                      set v [expr {int(rand() * 0x100000000) & ($off == 0x28 || $off == 0x30 ? 0xFFFFF000 : 0xFFFFFFFF)}]
+                      mwr [expr {0x10000000 + $off}] [regv $v]
+                      set r [regv [lindex [mrd [expr {0x10000000 + $off}]] 0]]
+                      if {$r != $v} { incr bad; if {$bad <= 5} { puts [format "  0x%02x: wrote %08x read %08x" $off $v $r] } }
+                  } }
+              puts "regtest: $bad mismatches in [expr {4 * $n}] write/read pairs"
+              foreach off {0x28 0x2C 0x30 0x34} { mwr [expr {0x10000000 + $off}] 0 } }
+    pipe   { set a [rd 0x0304]; set b [rd 0x0305]
+             puts [format "TxDetectRx seen %d, assertions %d (mod 256), PowerDown %d" [expr {$b & 1}] [expr {($b >> 8) & 0xFF}] [expr {($b >> 1) & 3}]]
+             for {set l 0} {$l < 4} {incr l} { set v [expr {($a >> (8*$l)) & 0xFF}]
+                 puts [format "lane %d: RxElecIdle now %d, ever low %d, RxValid seen %d, receiver detected %d, last RxStatus %d, PhyStatus in detect %d" \
+                     $l [expr {$v & 1}] [expr {($v >> 1) & 1}] [expr {($v >> 2) & 1}] [expr {($v >> 3) & 1}] [expr {($v >> 4) & 7}] [expr {($v >> 7) & 1}]] } }
     trace  { set t [rd 0x0303]; set n [expr {$t & 0x7F}]
              puts [format "LTSSM trace: %d entries, highest state 0x%02x" $n [expr {($t >> 8) & 0x3F}]]
              set p 0

@@ -715,7 +715,32 @@ module pci_eerie #(
     always @(posedge DRPCLK) drp_rdy <= DRPEN;
     assign DRPRDY = drp_rdy;
     assign DRPDO  = 16'd0;
-    assign DBGVECA = 64'd0; assign DBGVECB = 64'd0; assign DBGVECC = 12'd0;
+    // DBGVECA (pclk, sticky since configuration): PIPE receive / receiver detection status for
+    // hardware bring-up. Lane l (0..3) in [8l+7:8l]: {phystatus seen while TxDetectRx, last nonzero
+    // RxStatus[2:0], RxStatus 011 (receiver present) seen while TxDetectRx, RxValid seen,
+    // RxElecIdle low seen, RxElecIdle now}; [32] TxDetectRx seen, [34:33] PowerDown now,
+    // [47:40] TxDetectRx assertions (mod 256), [53:48] LTSSM state
+    wire [7:0] a_phys = {PIPERX7PHYSTATUS, PIPERX6PHYSTATUS, PIPERX5PHYSTATUS, PIPERX4PHYSTATUS,
+                         PIPERX3PHYSTATUS, PIPERX2PHYSTATUS, PIPERX1PHYSTATUS, PIPERX0PHYSTATUS};
+    reg  [63:0] dbg = 64'd0;
+    reg         dbg_det_q = 1'b0;
+    integer     dl;
+    always @(posedge pclk) begin
+        dbg_det_q <= PIPETXRCVRDET;
+        for (dl = 0; dl < 4; dl = dl + 1) begin
+            dbg[8*dl]   <= a_rxei[dl];
+            if (!a_rxei[dl]) dbg[8*dl+1] <= 1'b1;
+            if (a_rxv[dl]) dbg[8*dl+2] <= 1'b1;
+            if (PIPETXRCVRDET && a_rxst[3*dl +: 3] == 3'b011) dbg[8*dl+3] <= 1'b1;
+            if (a_rxst[3*dl +: 3] != 3'b000) dbg[8*dl+4 +: 3] <= a_rxst[3*dl +: 3];
+            if (PIPETXRCVRDET && a_phys[dl]) dbg[8*dl+7] <= 1'b1;
+        end
+        if (PIPETXRCVRDET) dbg[32] <= 1'b1;
+        dbg[34:33] <= p_powerdown;
+        if (PIPETXRCVRDET && !dbg_det_q) dbg[47:40] <= dbg[47:40] + 1'b1;
+        dbg[53:48] <= p_ltssm;
+    end
+    assign DBGVECA = dbg; assign DBGVECB = 64'd0; assign DBGVECC = 12'd0;
     assign DBGSCLRA = 1'b0; assign DBGSCLRB = 1'b0; assign DBGSCLRC = 1'b0; assign DBGSCLRD = 1'b0;
     assign DBGSCLRE = 1'b0; assign DBGSCLRF = 1'b0; assign DBGSCLRG = 1'b0; assign DBGSCLRH = 1'b0;
     assign DBGSCLRI = 1'b0; assign DBGSCLRJ = 1'b0; assign DBGSCLRK = 1'b0;
