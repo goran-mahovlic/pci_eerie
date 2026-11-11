@@ -5,6 +5,8 @@
 // 100 ms after configuration, then released. Controlled over JTAG (eerie_jtag_bus,
 // see tools/eerie_host.tcl): ctl bit 0 forces PERST# low, ctl bit 1 holds the core in reset,
 // ctl bit 2 drives PERST# high when released (default: released = high-Z).
+// Tested setup (doc/setup_k480t_optane.jpg): PCIe host Gen2 x2 with an Intel Optane NVMe SSD in a PUZHI
+// PZ-SSD adapter (vivado_impl.tcl ypcb_k480t_rp_pzssd), reading/writing its NVMe registers.
 // LEDs: 0 user_lnk_up, 1 PERST# released, 2 user clock heartbeat.
 `timescale 1ns / 1ps
 module top_ypcb_k480t_rp #(

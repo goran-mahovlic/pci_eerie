@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: CERN-OHL-P
 # Drive the pci_eerie root port test design (syn/top_ypcb_k480t_rp.v) over JTAG from Vivado:
 # register bus of syn/eerie_host_app.v through the BSCANE2 USER1 data register (eerie_jtag_bus).
+# Tested as a PCIe host Gen2 x2 on a K480T with an Intel Optane NVMe SSD (doc/setup_k480t_optane.jpg):
+# enum / regtest read and write its NVMe registers.
 # usage: vivado -mode batch -source tools/eerie_host.tcl -tclargs <cable serial|-> <command> [args]
 #   commands: status          link / LTSSM / clocks
 #             pipe            per-lane PIPE receive / receiver detection status (sticky)

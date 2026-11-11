@@ -1,5 +1,11 @@
 # pci_eerie
 
+![pci_eerie as a PCIe host: K480T root port and Intel Optane on an M.2 adapter](doc/setup_k480t_optane.jpg)
+
+*The PCIe host (root port) setup: a Kintex-7 480T card (YPCB) running pci_eerie as a Gen2 x2 root
+port in a PUZHI PZ-SSD x8-to-M.2 adapter with an Intel Optane NVMe SSD; it enumerates the SSD and
+reads/writes its NVMe registers, driven over JTAG (see "Root port on hardware" below).*
+
 An open-source soft PCI Express endpoint and root port for Xilinx 7-series FPGAs, written in plain
 Verilog-2005 (synthesizes with Vivado and with yosys/openXC7).
 
@@ -130,7 +136,8 @@ resumes it (`power/runtime_suspended_time` > 0). Running the test later, or writ
 device's `power/control`, avoids it; this is not related to the core, and is likely the cause of
 the occasional all-ones reads noted for the x1 builds above.
 
-Root port on hardware: the YPCB K480T card as an x4 root port (`syn/top_ypcb_k480t_rp.v`: the Vivado
+Root port on hardware (the setup in the photo at the top: PCIe host Gen2 x2 reading and writing
+NVMe registers): the YPCB K480T card as an x4 root port (`syn/top_ypcb_k480t_rp.v`: the Vivado
 root port core with pci_eerie in place of `PCIE_2_1`, plus `syn/eerie_host_app.v`) plugged into a PUZHI
 PZ-SSD (PCIe x8 female to M.2 adapter) with an Intel Optane Memory 16 GB (8086:2522, NVMe, Gen3 x2),
 controlled over JTAG. Results with `vivado_impl.tcl ypcb_k480t_rp_pzssd` (x4 Gen2) and
@@ -282,6 +289,7 @@ tools/fasm_canon.py  FASM canonicalizer used by the openXC7 flow
 tools/prog.tcl       JTAG programming (Vivado; selects the cable by serial)
 tools/eerie_host.tcl JTAG control of the root port test design (raw JTAG, BSCANE2 USER1)
 ext/pcie_7x          pcie_7x (git submodule)
+doc/                 photo of the PCIe host test setup (setup_k480t_optane.jpg)
 ```
 
 `integration/pcie_block.v`, `tb/board.v` and `tb/pci_exp_usrapp_tx.v` are modified Xilinx
