@@ -1,0 +1,11 @@
+# M_skp_eb: top=harness freq=31.25 MHz seed=1 defs='' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T18:19:02+00:00 (1795025942-1795025040=902 s)
+  GPIO:       4/    162     2%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:    9037/  40960    22%
+  CPE_FF:    1768/  40960     4%
+  CPE_RAMIO:       3/  40960     0%
+  RAM_HALF:       0/     64     0%
+  POSTROUTEMax frequency for clock 'dut.rclk': 3.47 MHz (FAIL at 31.25 MHz)
+  POSTROUTEMax frequency for clock 'dut.wclk': 11.70 MHz (FAIL at 31.25 MHz)
+nextpnr rc=1

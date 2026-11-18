@@ -150,6 +150,53 @@ module pci_eerie #(
     wire        st_idle, st_busy;
     wire        l0_pop;
 
+`ifdef EERIE_W8
+    // ------------------------------------------------------------------
+    // TASK-6161 (GateMate): x1 lane on a 64-bit PIPE, 8 symbols per PIPE clock (31.25 MHz at Gen1).
+    // PIPE lanes 0..3 carry symbols 0..7 of the one lane (lane 0 = symbols 0,1 = first on the wire);
+    // valid / status / electrical idle / polarity are those of lane 0.
+    // ------------------------------------------------------------------
+    wire [63:0] w8_rxd = {PIPERX3DATA, PIPERX2DATA, PIPERX1DATA, PIPERX0DATA};
+    wire [7:0]  w8_rxk = {PIPERX3CHARISK, PIPERX2CHARISK, PIPERX1CHARISK, PIPERX0CHARISK};
+    wire [63:0] w8_txd; wire [7:0] w8_txk; wire w8_txei;
+    wire        w8_va, w8_vb, w8_ea, w8_eb, w8_err, w8_mlerr;
+    wire [31:0] w8_da, w8_db; wire [3:0] w8_ka, w8_kb;
+    eerie_pl_rx_w8 pl_rx_w8 (
+        .clk(pclk), .rst(p_rst),
+        .pipe_rxdata(w8_rxd), .pipe_rxdatak(w8_rxk), .pipe_rxvalid(PIPERX0VALID),
+        .pipe_rxstatus(PIPERX0STATUS), .pipe_rxelecidle(PIPERX0ELECIDLE), .descramble_en(pl_descr_en),
+        .os_ts_valid(l_tsv[0]), .os_ts2(l_ts2[0]), .os_ts_inv(l_inv[0]),
+        .os_link(l_link[7:0]), .os_link_pad(l_lpad[0]), .os_lane(l_lane[7:0]), .os_lane_pad(l_npad[0]),
+        .os_nfts(l_nfts[7:0]), .os_rate(l_rate[7:0]), .os_ctrl(l_ctrl[7:0]),
+        .os_eios(l_eios[0]), .os_skp(l_skp[0]), .os_idle2(l_idle2[0]), .rx_err(w8_err),
+        .sl_va(w8_va), .sl_vb(w8_vb), .sl_da(w8_da), .sl_db(w8_db), .sl_ka(w8_ka), .sl_kb(w8_kb),
+        .sl_ea(w8_ea), .sl_eb(w8_eb)
+    );
+    assign l_pst[0] = 1'b0;
+    wire        plrx_we, rx_err;
+    wire [81:0] plrx_wd;
+    eerie_pl_rx_ml #(.N(4), .W4_FIXED(1)) rx_ml_w8 (
+        .clk(pclk), .rst(p_rst), .w4(1'b1),
+        .i_va(w8_va), .i_vb(w8_vb), .i_da(w8_da), .i_db(w8_db), .i_ka(w8_ka), .i_kb(w8_kb),
+        .i_erra(w8_ea), .i_errb(w8_eb), .rx_err(w8_mlerr), .pkt_we(plrx_we), .pkt_wd(plrx_wd)
+    );
+    assign rx_err = w8_err || w8_mlerr;
+    eerie_pl_tx_w8 pl_tx_w8 (
+        .clk(pclk), .rst(p_rst),
+        .mode(lane_en[0] ? tx_mode : M_EIDLE),
+        .ts_link(tx_link), .ts_link_pad(tx_link_pad || tx_link_pad_v[0]),
+        .ts_lane(tx_lane), .ts_lane_pad(tx_lane_pad || tx_lane_pad_v[0]),
+        .ts_nfts(tx_nfts), .ts_rate(tx_rate), .ts_ctrl(tx_ctrl), .scramble_en(pl_descr_en),
+        .ts_done(l_ts_done[0]), .eios_done(l_eios_done[0]), .idle_pair(l_idle_pair[0]), .busy(l_busy[0]),
+        .pkt_rd_data(pltx_rd_data), .pkt_rd_empty(pltx_rd_empty), .pkt_rd_en(pltx_rd_en),
+        .pipe_txdata(w8_txd), .pipe_txdatak(w8_txk), .pipe_txelecidle(w8_txei)
+    );
+    assign a_txd = {64'd0, w8_txd}; assign a_txk = {8'd0, w8_txk};
+    assign a_txei = {4'b1111, {4{w8_txei}}};
+    assign a_rxpol = {7'd0, rxpol[0]};
+    assign l0_pop = 1'b0; assign st_pop = 1'b0;
+    assign st_s0 = 0; assign st_s1 = 0; assign st_k0 = 0; assign st_k1 = 0; assign st_idle = 1'b0; assign st_busy = 1'b0;
+`else
     genvar gl;
     generate for (gl = 0; gl < NL; gl = gl + 1) begin : lane
         eerie_pl_rx pl_rx (
@@ -223,8 +270,12 @@ module pci_eerie #(
         assign plrx_we = l_pwe[0]; assign plrx_wd = l_pwd[81:0]; assign rx_err = l_rxerr[0];
     end
     endgenerate
+`endif
 
     eerie_ltssm #(
+`ifdef EERIE_W8
+        .US_DIV1(8'd30),
+`endif
         .MAX_RATE(MAX_RATE), .FAST_TRAIN(FAST), .N_FTS_GEN1(N_FTS_GEN1), .N_FTS_GEN2(N_FTS_GEN2),
         .UPCONFIG(UPCONFIG_CAPABLE == "TRUE"), .DSP(DSP), .NL(NL), .MAXW(MAXW)
     ) ltssm (

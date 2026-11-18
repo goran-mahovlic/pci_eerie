@@ -1,0 +1,10 @@
+# M_eerie_dll: top=harness freq=31.25 MHz seed=1 defs='' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T15:23:19+00:00 (1795015399-1795015320=79 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:    4282/  40960    10%
+  CPE_FF:    1679/  40960     4%
+  CPE_RAMIO:     196/  40960     0%
+  RAM_HALF:       2/     64     3%
+  POSTROUTEMax frequency for clock 'dut.clk': 23.84 MHz (FAIL at 31.25 MHz)
+nextpnr rc=1

@@ -1,0 +1,9 @@
+# M_eerie_tl_tx: top=harness freq=31.25 MHz seed=1 defs='' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T15:22:19+00:00 (1795015339-1795015319=20 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:     886/  40960     2%
+  CPE_FF:     618/  40960     1%
+  CPE_RAMIO:       2/  40960     0%
+  RAM_HALF:       0/     64     0%
+  POSTROUTEMax frequency for clock 'dut.clk': 70.20 MHz (PASS at 31.25 MHz)

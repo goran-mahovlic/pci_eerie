@@ -1,0 +1,7 @@
+ppm=600 rijeci=60000 usporedeno=478786/478788 simbola, SKP OS=404, umetnuto=0, uklonjeno=286, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..8 PASS 
+ppm=-600 rijeci=60000 usporedeno=478783/478788 simbola, SKP OS=404, umetnuto=269, uklonjeno=0, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..7 PASS 
+ppm=0 rijeci=60000 usporedeno=478781/478788 simbola, SKP OS=404, umetnuto=0, uklonjeno=1, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..7 PASS 
+ppm=300 rijeci=60000 usporedeno=478781/478788 simbola, SKP OS=404, umetnuto=0, uklonjeno=137, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..8 PASS 
+ppm=-300 rijeci=60000 usporedeno=478788/478788 simbola, SKP OS=404, umetnuto=120, uklonjeno=0, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..7 PASS 
+ppm=1000 rijeci=60000 usporedeno=478782/478788 simbola, SKP OS=404, umetnuto=0, uklonjeno=442, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..11 PASS 
+ppm=-1000 rijeci=60000 usporedeno=478788/478788 simbola, SKP OS=404, umetnuto=448, uklonjeno=0, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..7 PASS 

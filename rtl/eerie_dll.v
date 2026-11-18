@@ -446,8 +446,22 @@ module eerie_dll #(
     // RAM read data path
     reg  [63:0] rd_d;
     always @(posedge clk) rd_d <= txb_rdata[63:0];
+`ifdef EERIE_DLL_CRCPRE
+    // TASK-6161 (GateMate): the LCRC is linear, crc(c, D) = crc(c, 0) ^ crc(0, D); the data part is
+    // computed from the RAM output together with rd_d, so the f_crc feedback loop is a single XOR
+    // level of the state instead of 8 chained byte steps
+    `include "eerie_crcmat.vh"
+    reg  [31:0] rd_ch, rd_cf;
+    always @(posedge clk) begin
+        rd_ch <= f_crc32_dat32(txb_rdata[63:32]);
+        rd_cf <= f_crc32_dat64(txb_rdata[63:0]);
+    end
+    wire [31:0] crc_hi   = f_crc32_adv32(f_crc) ^ rd_ch;
+    wire [31:0] crc_full = f_crc32_adv64(f_crc) ^ rd_cf;
+`else
     wire [31:0] crc_hi   = f_crc32_dw(f_crc, rd_d[63:32]);
     wire [31:0] crc_full = f_crc32_dw(crc_hi, rd_d[31:0]);
+`endif
     wire [31:0] lcrc_h   = f_lcrc_field(crc_hi);
     wire [31:0] lcrc_f   = f_lcrc_field(f_crc);
     wire rd_valid = rd_pipe[TXB_RLAT+1];

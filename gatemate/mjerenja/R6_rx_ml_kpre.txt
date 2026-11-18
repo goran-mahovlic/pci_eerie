@@ -1,0 +1,10 @@
+# R6_rx_ml_kpre: top=harness freq=31.25 MHz seed=1 defs='EERIE_ML_CRCMAT EERIE_ML_DLCPRE EERIE_ML_QREG EERIE_ML_ADUP EERIE_ML_KPRE' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T18:20:27+00:00 (1795026027-1795025745=282 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:    4850/  40960    11%
+  CPE_FF:    2014/  40960     4%
+  CPE_RAMIO:       2/  40960     0%
+  RAM_HALF:       0/     64     0%
+  POSTROUTEMax frequency for clock 'dut.clk': 27.86 MHz (FAIL at 31.25 MHz)
+nextpnr rc=1

@@ -1,0 +1,8 @@
+# B1_noluttree: top=ccfpga_physical_layer_wrapper freq=31.25 MHz seed=1 defs='' synth='' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T15:19:41+00:00 (1795015181-1795015172=9 s)
+  GPIO:     147/    162    90%
+  PLL:       0/      4     0%
+  SERDES:       1/      1   100%
+  CPE_LT:    2053/  40960     5%
+  CPE_FF:    1365/  40960     3%
+  CPE_RAMIO:     344/  40960     0%
+  RAM_HALF:       0/     64     0%

@@ -1,0 +1,10 @@
+# B1_seed2: top=ccfpga_physical_layer_wrapper freq=31.25 MHz seed=2 defs='' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T15:20:57+00:00 (1795015257-1795015172=85 s)
+  GPIO:     147/    162    90%
+  PLL:       0/      4     0%
+  SERDES:       1/      1   100%
+  CPE_LT:    4721/  40960    11%
+  CPE_FF:    1365/  40960     3%
+  CPE_RAMIO:     344/  40960     0%
+  RAM_HALF:       0/     64     0%
+  POSTROUTEMax frequency for clock 'mac_inst.ccfpga_LTSSM_fsm_inst.i_PCLK': 21.79 MHz (FAIL at 31.25 MHz)
+nextpnr rc=1

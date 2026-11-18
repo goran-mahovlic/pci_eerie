@@ -1,0 +1,10 @@
+# D2_dll_crcmat: top=harness freq=31.25 MHz seed=1 defs='EERIE_DLL_CRCPRE' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T15:29:14+00:00 (1795015754-1795015680=74 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:    4580/  40960    11%
+  CPE_FF:    1743/  40960     4%
+  CPE_RAMIO:     196/  40960     0%
+  RAM_HALF:       2/     64     3%
+  POSTROUTEMax frequency for clock 'dut.clk': 29.22 MHz (FAIL at 31.25 MHz)
+nextpnr rc=1

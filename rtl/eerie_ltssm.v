@@ -17,6 +17,7 @@
 module eerie_ltssm #(
     parameter MAX_RATE   = 1,       // 1: 2.5 GT/s, 2: 5.0 GT/s
     parameter FAST_TRAIN = 0,       // shorten timers for simulation
+    parameter [7:0] US_DIV1 = 8'd124, // PIPE clocks per microsecond - 1 at 2.5 GT/s (TASK-6161: 30 at 31.25 MHz)
     parameter [7:0] N_FTS_GEN1 = 8'd255,
     parameter [7:0] N_FTS_GEN2 = 8'd255,
     parameter       UPCONFIG   = 1,      // advertise Link Upconfigure Capability (TS2 symbol 4 bit 6)
@@ -127,7 +128,7 @@ module eerie_ltssm #(
         us_tick <= 1'b0;
         if (rst || t_clr) begin
             us_div <= 8'd0; t_us <= 16'd0;
-        end else if (us_div == (pipe_rate ? 8'd249 : 8'd124)) begin
+        end else if (us_div == (pipe_rate ? 8'd249 : US_DIV1)) begin
             us_div <= 8'd0; us_tick <= 1'b1;
             if (t_us != 16'hFFFF) t_us <= t_us + 1'b1;
         end else us_div <= us_div + 1'b1;
@@ -533,7 +534,13 @@ module eerie_ltssm #(
             end
             ST_CIDLE: begin
                 tx_mode <= M_IDLE; link_up <= 1'b1; link_width <= cfg_w;
-                if (os_idle2) begin cnt_a <= inc4(cnt_a); rx_first <= 1'b1; end
+                if (os_idle2) begin
+`ifdef EERIE_W8
+                    cnt_a <= 4'd8; // TASK-6161: x1 64-bit PIPE: os_idle2 = 8 consecutive idle symbols
+`else
+                    cnt_a <= inc4(cnt_a);
+`endif
+                    rx_first <= 1'b1; end
                 else if (os_ts_valid) cnt_a <= 4'd0;
                 if (rx_first && tx_idle_pair && tx_after != 6'h3F) tx_after <= tx_after + 1'b1;
                 if (a_ge4 && ta_ge8 && cnt_fresh) goto(ST_L0);
@@ -663,7 +670,13 @@ module eerie_ltssm #(
             end
             ST_RIDLE: begin
                 tx_mode <= M_IDLE;
-                if (os_idle2) begin cnt_a <= inc4(cnt_a); rx_first <= 1'b1; end
+                if (os_idle2) begin
+`ifdef EERIE_W8
+                    cnt_a <= 4'd8; // TASK-6161: x1 64-bit PIPE: os_idle2 = 8 consecutive idle symbols
+`else
+                    cnt_a <= inc4(cnt_a);
+`endif
+                    rx_first <= 1'b1; end
                 else if (os_ts_valid) cnt_a <= 4'd0;
                 if (ts1 && os_ctrl[0]) cnt_b <= inc4(cnt_b);
                 else if (ts1 && os_lane_pad) cnt_b <= 4'd0;

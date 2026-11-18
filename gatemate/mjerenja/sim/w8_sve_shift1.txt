@@ -1,0 +1,29 @@
+# sim/run_w8.sh -DEERIE_ML_CRCMAT -DEERIE_ML_DLCPRE -DEERIE_DLL_CRCPRE -DEERIE_W8_IDLEPRE -DEERIE_W8_PAPRE -DEERIE_ML_QREG -DEERIE_SCR8_MAT -DEERIE_SCR8_PTREE -DEERIE_ML_ADUP -DEERIE_ML_KPRE -DEERIE_ML_CDUP -- +shift=1  (2026-11-18T18:43:58+00:00)
+               20000 EP LTSSM 0x00
+             2388000 EP LTSSM 0x02
+             2676000 EP LTSSM 0x04
+             7156000 EP LTSSM 0x05
+             8340000 EP LTSSM 0x0b
+             9012000 EP LTSSM 0x0d
+             9908000 EP LTSSM 0x0f
+            10932000 EP LTSSM 0x10
+            11124000 EP LTSSM 0x11
+            12244000 EP LTSSM 0x15
+            13172000 EP LTSSM 0x16
+            14284000 EP DL up (trn_lnk_up)
+            20036000   CplD dw0=4a000001 dw1=00000004 dw2=00000100 data=0412e1e0
+  OK   CfgRd0 0x00 ID = 0412e1e0
+            22596000   CplD dw0=0a000000 dw1=01000004 dw2=00000200 data=00000000
+            25156000   CplD dw0=4a000001 dw1=01000004 dw2=00000300 data=00f0ffff
+  OK   BAR0 velicina = 00f0ffff
+            27716000   CplD dw0=0a000000 dw1=01000004 dw2=00000400 data=00000000
+            30276000   CplD dw0=0a000000 dw1=01000004 dw2=00000500 data=00000000
+            32612000   CplD dw0=4a000001 dw1=01000004 dw2=00000600 data=1e0e444c
+  OK   BAR0+0 ID (bajt-red CPU-a) = 4c440e1e
+            35108000   CplD dw0=4a000001 dw1=01000004 dw2=0000070c data=cafef00d
+  OK   BAR0+0x0C scratch = cafef00d
+            37444000   CplD dw0=4a000001 dw1=01000004 dw2=00000808 data=01160000
+  OK   BAR0+8 lnk_up = 00000001
+  OK   EP rx_err u L0 = 00000000
+PASS 6/6 (EP LTSSM 0x16)
+sim/tb_w8.v:160: $finish called at 37460000 (1ps)

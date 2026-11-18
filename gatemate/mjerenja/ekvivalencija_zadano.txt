@@ -1,0 +1,5 @@
+pci_eerie.v razlika_redaka=0
+eerie_ltssm:   Of those cells 352 are proven and 0 are unproven.
+eerie_dll:   Of those cells 2261 are proven and 0 are unproven.
+eerie_pl_rx_ml N=2:   Of those cells 2433 are proven and 0 are unproven.
+eerie_pl_rx_ml N=4:   Of those cells 2433 are proven and 0 are unproven.

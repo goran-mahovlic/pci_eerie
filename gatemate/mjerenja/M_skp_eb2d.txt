@@ -1,0 +1,10 @@
+# M_skp_eb2d: top=harness freq=31.25 MHz seed=1 defs='EERIE_SKP_EB2' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T18:37:36+00:00 (1795027056-1795026911=145 s)
+  GPIO:       4/    162     2%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:    5391/  40960    13%
+  CPE_FF:    2111/  40960     5%
+  CPE_RAMIO:       3/  40960     0%
+  RAM_HALF:       0/     64     0%
+  POSTROUTEMax frequency for clock 'dut.rclk': 52.80 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock 'dut.wclk': 37.07 MHz (PASS at 31.25 MHz)

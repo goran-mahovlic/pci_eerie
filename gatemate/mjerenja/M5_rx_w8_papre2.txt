@@ -1,0 +1,10 @@
+# M5_rx_w8_papre2: top=harness freq=31.25 MHz seed=1 defs='EERIE_W8 EERIE_W8_IDLEPRE EERIE_W8_PAPRE' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T17:29:16+00:00 (1795022956-1795022869=87 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:    4915/  40960    11%
+  CPE_FF:    1571/  40960     3%
+  CPE_RAMIO:       2/  40960     0%
+  RAM_HALF:       0/     64     0%
+  POSTROUTEMax frequency for clock 'dut.clk': 26.70 MHz (FAIL at 31.25 MHz)
+nextpnr rc=1

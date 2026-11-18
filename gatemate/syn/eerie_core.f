@@ -1,0 +1,17 @@
++incdir+../rtl
+../rtl/eerie_sync.v
+../rtl/eerie_async_fifo.v
+../rtl/eerie_pl_rx.v
+../rtl/eerie_pl_rx_ml.v
+../rtl/eerie_pl_deskew.v
+../rtl/eerie_pl_tx.v
+../rtl/eerie_pl_tx_ml.v
+../rtl/eerie_ltssm.v
+../rtl/eerie_dll.v
+../rtl/eerie_cfg.v
+../rtl/eerie_tl_rx.v
+../rtl/eerie_tl_tx.v
+../rtl/pci_eerie.v
+../rtl/eerie_scr8.v
+../rtl/eerie_pl_tx_w8.v
+../rtl/eerie_pl_rx_w8.v

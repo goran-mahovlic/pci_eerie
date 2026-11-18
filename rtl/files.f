@@ -11,3 +11,6 @@ eerie_cfg.v
 eerie_tl_rx.v
 eerie_tl_tx.v
 pci_eerie.v
+eerie_scr8.v
+eerie_pl_tx_w8.v
+eerie_pl_rx_w8.v

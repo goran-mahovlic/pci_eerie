@@ -1,0 +1,10 @@
+# A4s2_w8_ep_sve2: top=harness freq=31.25 MHz seed=2 defs='EERIE_W8 EERIE_DLL_CRCPRE EERIE_ML_CRCMAT EERIE_ML_DLCPRE EERIE_ML_QREG EERIE_W8_IDLEPRE EERIE_W8_PAPRE EERIE_SCR8_MAT EERIE_SCR8_PTREE' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T18:15:35+00:00 (1795025735-1795025013=722 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:   20845/  40960    50%
+  CPE_FF:    7391/  40960    18%
+  CPE_RAMIO:    1475/  40960     3%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock 'dut.clk': 21.75 MHz (FAIL at 31.25 MHz)
+nextpnr rc=1

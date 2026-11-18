@@ -1,0 +1,27 @@
+               12000 EP LTSSM 0x00
+             2228000 EP LTSSM 0x02
+             2340000 EP LTSSM 0x04
+             6564000 EP LTSSM 0x05
+             7796000 EP LTSSM 0x0b
+             8084000 EP LTSSM 0x0d
+             8596000 EP LTSSM 0x0f
+             9236000 EP LTSSM 0x10
+             9364000 EP LTSSM 0x11
+            10420000 EP LTSSM 0x15
+            10772000 EP LTSSM 0x16
+            11316000 EP DL up (trn_lnk_up)
+            15956000   CplD dw0=4a000001 dw1=00000004 dw2=00000100 data=0412e1e0
+  OK   CfgRd0 0x00 ID = 0412e1e0
+            17396000   CplD dw0=0a000000 dw1=01000004 dw2=00000200 data=00000000
+            18836000   CplD dw0=4a000001 dw1=01000004 dw2=00000300 data=00f0ffff
+  OK   BAR0 velicina = 00f0ffff
+            20276000   CplD dw0=0a000000 dw1=01000004 dw2=00000400 data=00000000
+            21716000   CplD dw0=0a000000 dw1=01000004 dw2=00000500 data=00000000
+            23044000   CplD dw0=4a000001 dw1=01000004 dw2=00000600 data=1e0e444c
+  OK   BAR0+0 ID (bajt-red CPU-a) = 4c440e1e
+            24532000   CplD dw0=4a000001 dw1=01000004 dw2=0000070c data=cafef00d
+  OK   BAR0+0x0C scratch = cafef00d
+            25860000   CplD dw0=4a000001 dw1=01000004 dw2=00000808 data=01160000
+  OK   BAR0+8 lnk_up = 00000001
+PASS 5/5 (EP LTSSM 0x16)
+sim/tb_loop.v:189: $finish called at 25876000 (1ps)

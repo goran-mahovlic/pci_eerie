@@ -1,0 +1,1 @@
+scr8: PASS: 50000 ciklusa, 12501 s COM, 0 razlika

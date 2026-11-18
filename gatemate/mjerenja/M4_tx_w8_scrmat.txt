@@ -1,0 +1,9 @@
+# M4_tx_w8_scrmat: top=harness freq=31.25 MHz seed=1 defs='EERIE_W8 EERIE_SCR8_MAT' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T17:23:44+00:00 (1795022624-1795022599=25 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:    1563/  40960     3%
+  CPE_FF:     482/  40960     1%
+  CPE_RAMIO:       2/  40960     0%
+  RAM_HALF:       0/     64     0%
+  POSTROUTEMax frequency for clock 'dut.clk': 37.84 MHz (PASS at 31.25 MHz)

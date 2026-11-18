@@ -1,0 +1,10 @@
+# R1_rx_ml_crcmat: top=harness freq=31.25 MHz seed=1 defs='EERIE_ML_CRCMAT' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T16:08:31+00:00 (1795018111-1795017824=287 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:    4987/  40960    12%
+  CPE_FF:    1809/  40960     4%
+  CPE_RAMIO:       2/  40960     0%
+  RAM_HALF:       0/     64     0%
+  POSTROUTEMax frequency for clock 'dut.clk': 25.10 MHz (FAIL at 31.25 MHz)
+nextpnr rc=1

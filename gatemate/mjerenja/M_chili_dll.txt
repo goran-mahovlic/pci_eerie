@@ -1,0 +1,8 @@
+# M_chili_dll: top=harness freq=31.25 MHz seed=1 defs='' synth='-luttree -nomx8' pnr='' lanac=oss-cad-suite-20261117 2026-11-18T15:34:10+00:00 (1795016050-1795015875=175 s)
+  GPIO:       3/    162     1%
+  PLL:       0/      4     0%
+  SERDES:       0/      1     0%
+  CPE_LT:   68362/  40960   166%
+  CPE_FF:   34540/  40960    84%
+  CPE_RAMIO:     163/  40960     0%
+  RAM_HALF:       2/     64     3%

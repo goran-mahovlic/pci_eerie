@@ -21,6 +21,11 @@ Scope: endpoint or root port (selected like on `PCIE_2_1`, by `PCIE_CAP_DEVICE_P
 0 or 4), x1, x2 and x4 links (`LINK_CAP_MAX_LINK_WIDTH` 1, 2, 4; an x8 build trains to x4 so far),
 2.5 GT/s and 5.0 GT/s (Gen1/Gen2), 64-bit TRN interface. Gen3 is not planned.
 
+## GateMate (branch gatemate-w8)
+
+x1 Gen1 on Cologne Chip GateMate with a 64-bit PIPE at 31.25 MHz, SKP elastic buffer in the fabric,
+all as build options (default = upstream behaviour): see [gatemate/README.md](gatemate/README.md).
+
 ## Status
 
 All tests run against the Vivado example design's root port model (itself a `PCIE_2_1` in
