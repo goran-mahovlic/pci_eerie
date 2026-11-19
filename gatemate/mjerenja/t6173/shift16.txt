@@ -1,0 +1,16 @@
+shift0 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 1, 5.0 GT/s 4 | rx_err L0 0, all 1; 
+shift1 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 2, 5.0 GT/s 5 | rx_err L0 0, all 1; 
+shift2 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 3, 5.0 GT/s 6 | rx_err L0 0, all 1; 
+shift3 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 4, 5.0 GT/s 7 | rx_err L0 0, all 1; 
+shift4 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 5, 5.0 GT/s 8 | rx_err L0 0, all 1; 
+shift5 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 6, 5.0 GT/s 9 | rx_err L0 0, all 1; 
+shift6 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 7, 5.0 GT/s 10 | rx_err L0 0, all 1; 
+shift7 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 8, 5.0 GT/s 11 | rx_err L0 0, all 1; 
+shift8 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 9, 5.0 GT/s 12 | rx_err L0 0, all 1; 
+shift9 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 10, 5.0 GT/s 13 | rx_err L0 0, all 1; 
+shift10 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 11, 5.0 GT/s 14 | rx_err L0 0, all 1; 
+shift11 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 12, 5.0 GT/s 7 | rx_err L0 0, all 1; 
+shift12 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 13, 5.0 GT/s 8 | rx_err L0 0, all 1; 
+shift13 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 14, 5.0 GT/s 9 | rx_err L0 0, all 1; 
+shift14 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 15, 5.0 GT/s 10 | rx_err L0 0, all 1; 
+shift15 | PASS | Checker: 59 rules, 0 violations | TS COM symbol 2.5 GT/s 0, 5.0 GT/s 11 | rx_err L0 0, all 1; 

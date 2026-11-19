@@ -90,7 +90,7 @@ module tb;
     void'($value$plusargs("ppm=%d", rt_ppm));           // read here: the order of initial blocks is not defined
     ui_ep_ps = 400.0 * (1.0 + rt_ppm * 1.0e-6); retime = (rt_ppm != 0) || $test$plusargs("retime");
   end
-  ser_retimer u_rt (.serclk(serclk), .din(ser_up), .ui_in_ps(ui_ep_ps), .dout(ser_up_rt), .n_ins(rt_ins), .n_del(rt_del));
+  ser_retimer u_rt (.serclk(serclk), .din(ser_up), .ui_in_ps(ui_ep_ps), .gen2(1'b0), .dout(ser_up_rt), .n_ins(rt_ins), .n_del(rt_del));
   assign ser_up_rc = retime ? ser_up_rt : ser_up;
 
   // ---------------- host ----------------

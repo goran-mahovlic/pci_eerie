@@ -1,0 +1,10 @@
+# N18A_s2: netlist build/gm/M2A_s2/top.json (a5332f54b7c9) seed=2 pnr='--tmg-ripup' nextpnr="nextpnr-himbaechel" -- Next Generation Place and Route (Version nextpnr-0.11.1-103-ge811ba48) 2026-11-18T23:21:40+00:00 (639 s)
+  # PREKINUTO ručno (TASK-6170, uputa #879): 20261118 je za GateMate P&R bit-identičan 20261117 — nedovršeno rutiranje, ne koristiti
+  SERDES:       1/      1   100%
+  CPE_LT:   21088/  40960    51%
+  CPE_FF:    7511/  40960    18%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock      'ep.app.clk': 22.03 MHz (FAIL at 31.25 MHz)
+  POSTROUTEMax frequency for clock '$iopadmap$clk_i': 103.31 MHz (PASS at 31.25 MHz)
+nextpnr rc=143
+  zadnja iteracija: iter=4 wires=935607 overused=25333 overuse=25567 resources=40333 overused=653 overuse=750 tmgfail=0 archfail=NA

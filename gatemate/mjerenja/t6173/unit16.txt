@@ -1,0 +1,6 @@
+scr16: PASS: 100000 ciklusa, 24854 s COM, scr16 0 razlika, scr8 0 razlika
+eb16: ppm=0 rijeci=30000 usporedeno=478773/478788 simbola, SKP OS=404, umetnuto=0, uklonjeno=1, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..7 PASS
+eb16: ppm=300 rijeci=30000 usporedeno=478773/478788 simbola, SKP OS=404, umetnuto=0, uklonjeno=129, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..8 PASS
+eb16: ppm=-300 rijeci=30000 usporedeno=478788/478788 simbola, SKP OS=404, umetnuto=96, uklonjeno=0, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..7 PASS
+eb16: ppm=600 rijeci=30000 usporedeno=478773/478788 simbola, SKP OS=404, umetnuto=0, uklonjeno=273, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..8 PASS
+eb16: ppm=-600 rijeci=30000 usporedeno=478788/478788 simbola, SKP OS=404, umetnuto=240, uklonjeno=0, podljev=0, krivih=0, SKP-niz izvan 1..5=0, popunjenost 0..7 PASS

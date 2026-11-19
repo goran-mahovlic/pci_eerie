@@ -15,6 +15,11 @@
 ../rtl/eerie_scr8.v
 ../rtl/eerie_pl_tx_w8.v
 ../rtl/eerie_pl_rx_w8.v
+../rtl/eerie_scr16.v
+../rtl/eerie_pl_tx_w16.v
+../rtl/eerie_pl_rx_w16.v
+../rtl/eerie_slot_fifo.v
+../rtl/eerie_async_fifo2.v
 +incdir+rtl
 rtl/eerie_ram_sdp.v
 rtl/eerie_w8_core.v

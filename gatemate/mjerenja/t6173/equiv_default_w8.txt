@@ -1,0 +1,22 @@
+eerie_ltssm [none]: PROVEN Found 352 $equiv cells in eq:   Of those cells 352 are proven and 0 are unproven. 
+eerie_dll [none]: PROVEN Found 2262 $equiv cells in eq:   Of those cells 2262 are proven and 0 are unproven. 
+eerie_async_fifo [none]: PROVEN Found 1150 $equiv cells in eq:   Of those cells 1150 are proven and 0 are unproven. 
+eerie_async_fifo W67 AW7 PKT_MODE1 [none]: PROVEN Found 8741 $equiv cells in eq:
+pci_eerie [none]: preprocessed text, 8 differing lines
+<     eerie_async_fifo #(.W(82), .AW(4), .PKT_MODE(0)) rx_fifo (
+>     localparam FIFO_SYNC = 0;
+>     eerie_async_fifo #(.W(82), .AW(4), .PKT_MODE(0), .SYNC(FIFO_SYNC)) rx_fifo (
+<     eerie_async_fifo #(.W(67), .AW(7), .PKT_MODE(1)) tx_fifo (
+>     eerie_async_fifo #(.W(67), .AW(7), .PKT_MODE(1), .SYNC(FIFO_SYNC)) tx_fifo (
+>     localparam [7:0]  ACK_DLY = 8'd2;
+eerie_ltssm [w8]: PROVEN Found 352 $equiv cells in eq:   Of those cells 352 are proven and 0 are unproven. 
+eerie_dll [w8]: PROVEN Found 2262 $equiv cells in eq:   Of those cells 2262 are proven and 0 are unproven. 
+eerie_async_fifo [w8]: PROVEN Found 1150 $equiv cells in eq:   Of those cells 1150 are proven and 0 are unproven. 
+eerie_async_fifo W67 AW7 PKT_MODE1 [w8]: PROVEN Found 8741 $equiv cells in eq:
+pci_eerie [w8]: preprocessed text, 8 differing lines
+<     eerie_async_fifo #(.W(82), .AW(4), .PKT_MODE(0)) rx_fifo (
+>     localparam FIFO_SYNC = 0;
+>     eerie_async_fifo #(.W(82), .AW(4), .PKT_MODE(0), .SYNC(FIFO_SYNC)) rx_fifo (
+<     eerie_async_fifo #(.W(67), .AW(7), .PKT_MODE(1)) tx_fifo (
+>     eerie_async_fifo #(.W(67), .AW(7), .PKT_MODE(1), .SYNC(FIFO_SYNC)) tx_fifo (
+>     localparam [7:0]  ACK_DLY = 8'd2;

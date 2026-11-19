@@ -1,0 +1,13 @@
+# M2V_s3 (TASK-6177: = M2H_s3 + VID 1397 DID 4D32, gradnja kao M2H_s3 u worktree 477a866): m2_pcie_top SRNS=0 seed=3 pnr='--tmg-ripup' lanac=oss-cad-suite-20261117 2026-11-19T09:01:30+00:00 (1223 s)
+  IOSEL:      11/    162     6%
+  GPIO:      11/    162     6%
+  CLKIN:       1/      1   100%
+  GLBOUT:       1/      1   100%
+  SERDES:       1/      1   100%
+  CPE_LT:   21092/  40960    51%
+  CPE_FF:    7536/  40960    18%
+  CPE_RAMIO:    1761/  40960     4%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock      'ep.app.clk': 31.41 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock '$iopadmap$clk_i': 146.37 MHz (PASS at 31.25 MHz)
+  bit build/gm/M2H_s3/M2H_s3.bit 859645 B sha256 551214496802a1b8

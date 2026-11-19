@@ -1,0 +1,7 @@
+build cc0: +define+CDR_MODEL=FAST 
+build cc1: +define+RX_PAIR1 +define+CDR_MODEL=FAST 
+build eb: +define+SRNS +define+CDR_MODEL=FAST 
+build eb1: +define+SRNS +define+RX_PAIR1 +define+CDR_MODEL=FAST 
+build ebacc: +define+SRNS +define+CDR_MODEL=ACCURATE 
+build tester: +define+CDR_MODEL=FAST 
+build g1: +define+EP_GEN1 +define+CDR_MODEL=FAST 

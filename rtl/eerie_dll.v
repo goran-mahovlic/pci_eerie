@@ -24,6 +24,9 @@ module eerie_dll #(
     input             rst,
     input             link_up,          // from LTSSM (synchronized)
     input             link_l0,          // LTSSM in L0 (replay timer runs only then)
+`ifdef EERIE_W16
+    input             link_gen2,        // TASK-6173: 5.0 GT/s (the user clock is twice as fast as at 2.5 GT/s)
+`endif
     output reg        dl_up,            // DL_Active
     output reg        dl_init,
     output reg        retrain_req,      // pulse: REPLAY_NUM rollover
@@ -549,7 +552,11 @@ module eerie_dll #(
             if (fc_upd_req[1]) updfc_pend[1] <= 1'b1;
             if (fc_upd_req[2] && !CPL_INFINITE) updfc_pend[2] <= 1'b1;
             if (dls == DL_ACTIVE) begin
+`ifdef EERIE_W16
+                if (updfc_timer >= (link_gen2 ? UPDFC_PERIOD : {1'b0, UPDFC_PERIOD[15:1]})) begin
+`else
                 if (updfc_timer >= UPDFC_PERIOD) begin
+`endif
                     updfc_timer <= 16'd0;
                     updfc_pend <= CPL_INFINITE ? 3'b011 : 3'b111;
                 end else updfc_timer <= updfc_timer + 1'b1;

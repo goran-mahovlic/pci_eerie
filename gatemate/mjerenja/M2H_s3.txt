@@ -1,0 +1,13 @@
+# M2H_s3: m2_pcie_top SRNS=0 seed=3 pnr='--tmg-ripup' lanac=oss-cad-suite-20261117 2026-11-19T07:55:50+00:00 (1200 s)
+  IOSEL:      11/    162     6%
+  GPIO:      11/    162     6%
+  CLKIN:       1/      1   100%
+  GLBOUT:       1/      1   100%
+  SERDES:       1/      1   100%
+  CPE_LT:   21193/  40960    51%
+  CPE_FF:    7536/  40960    18%
+  CPE_RAMIO:    1761/  40960     4%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock      'ep.app.clk': 31.92 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock '$iopadmap$clk_i': 109.42 MHz (PASS at 31.25 MHz)
+  bit build/gm/M2H_s3/M2H_s3.bit 892529 B sha256 15c90f19911d79e8

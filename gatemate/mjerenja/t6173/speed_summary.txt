@@ -1,0 +1,8 @@
+seed1 | FAIL | Checker: 59 rules, 2 violations | speed/recovery/with-speed: 2 3 5 |  2 DL.ACK-LAT 
+seed2 | PASS | Checker: 59 rules, 0 violations | speed/recovery/with-speed: 2 4 4 | 
+seed3 | PASS | Checker: 59 rules, 0 violations | speed/recovery/with-speed: 2 3 5 | 
+seed4 | PASS | Checker: 59 rules, 0 violations | speed/recovery/with-speed: 2 1 7 | 
+seed5 | FAIL | Checker: 59 rules, 2 violations | speed/recovery/with-speed: 2 3 5 |  2 DL.ACK-LAT 
+seed6 | PASS | Checker: 59 rules, 0 violations | speed/recovery/with-speed: 2 3 5 | 
+seed7 | FAIL | Checker: 59 rules, 2 violations | speed/recovery/with-speed: 2 4 4 |  2 DL.ACK-LAT 
+seed8 | PASS | Checker: 59 rules, 0 violations | speed/recovery/with-speed: 2 2 6 | 

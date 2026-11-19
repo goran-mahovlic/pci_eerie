@@ -1,0 +1,10 @@
+# C22C_s2: netlist build/gm/M2C_s1/top.json (9d5145fffb37) seed=2 pnr='--tmg-ripup' nextpnr="nextpnr-himbaechel" -- Next Generation Place and Route (Version nextpnr-0.11.1-111-gc22d0709) 2026-11-19T08:42:17+00:00 (33613 s)
+  SERDES:       1/      1   100%
+  CPE_LT:   26142/  40960    63%
+  CPE_FF:    9458/  40960    23%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock  '$iopadmap$clk_i': 103.96 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock       'ep.app.clk': 23.75 MHz (FAIL at 31.25 MHz)
+  POSTROUTEMax frequency for clock 'phy.g_eb.eb.wclk': 28.81 MHz (FAIL at 31.25 MHz)
+nextpnr rc=143
+  zadnja iteracija: iter=84 wires=1843302 overused=24973 overuse=25049 resources=217096 overused=822 overuse=1948 tmgfail=17558 archfail=NA

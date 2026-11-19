@@ -1,0 +1,16 @@
+# M2F_s3: m2_pcie_top SRNS=0 seed=3 pnr='--tmg-ripup' lanac=oss-cad-suite-20261117 2026-11-19T01:36:29+00:00 (10614 s)
+  IOSEL:       3/    162     1%
+  GPIO:       3/    162     1%
+  CLKIN:       1/      1   100%
+  GLBOUT:       1/      1   100%
+  SERDES:       1/      1   100%
+  CPE_LT:   21088/  40960    51%
+  CPE_FF:    7511/  40960    18%
+  CPE_RAMIO:    1752/  40960     4%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock      'ep.app.clk': 25.06 MHz (FAIL at 31.25 MHz)
+  POSTROUTEMax frequency for clock '$iopadmap$clk_i': 85.98 MHz (PASS at 31.25 MHz)
+ERROR: Hold/min time violation for clock 'posedge ep.app.clk':
+ERROR: Hold/min time violation for clock 'posedge ep.app.clk':
+ERROR: Hold/min time violation for clock 'posedge ep.app.clk':
+  bit build/gm/M2F_s3/M2F_s3.bit 927761 B sha256 9ddbcfa58f4dca05

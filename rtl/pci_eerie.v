@@ -150,7 +150,66 @@ module pci_eerie #(
     wire        st_idle, st_busy;
     wire        l0_pop;
 
-`ifdef EERIE_W8
+`ifdef EERIE_W16
+    // ------------------------------------------------------------------
+    // TASK-6173 (GateMate): x1 lane on a 128-bit PIPE, 16 symbols per PIPE clock (31.25 MHz at 5.0 GT/s,
+    // 15.625 MHz at 2.5 GT/s: fixed width, the PIPE clock follows the rate). PIPE lanes 0..7 carry
+    // symbols 0..15 of the one lane (lane 0 = symbols 0,1 = first on the wire); valid / status /
+    // electrical idle / polarity are those of lane 0. The receive slots go through eerie_slot_fifo to
+    // the 64-bit receive framing (eerie_pl_rx_ml, 8 bytes per clock); the transmit path takes the 8-byte
+    // packet FIFO entries two at a time.
+    // ------------------------------------------------------------------
+    wire [127:0] w16_rxd = a_rxd;
+    wire [15:0]  w16_rxk = a_rxk;
+    wire [127:0] w16_txd; wire [15:0] w16_txk; wire w16_txei;
+    wire [3:0]   w16_sv, w16_se; wire [127:0] w16_sd; wire [15:0] w16_sk;
+    wire         w8_va, w8_vb, w8_ea, w8_eb, w8_err, w8_mlerr, w16_ovf;
+    wire [31:0]  w8_da, w8_db; wire [3:0] w8_ka, w8_kb;
+    wire [1:0]   pltx_rd_n; wire pltx_rd_has2; wire [66:0] pltx_rd_data2;
+    eerie_pl_rx_w16 pl_rx_w16 (
+        .clk(pclk), .rst(p_rst),
+        .pipe_rxdata(w16_rxd), .pipe_rxdatak(w16_rxk), .pipe_rxvalid(PIPERX0VALID),
+        .pipe_rxstatus(PIPERX0STATUS), .pipe_rxelecidle(PIPERX0ELECIDLE), .descramble_en(pl_descr_en),
+        .os_ts_valid(l_tsv[0]), .os_ts2(l_ts2[0]), .os_ts_inv(l_inv[0]),
+        .os_link(l_link[7:0]), .os_link_pad(l_lpad[0]), .os_lane(l_lane[7:0]), .os_lane_pad(l_npad[0]),
+        .os_nfts(l_nfts[7:0]), .os_rate(l_rate[7:0]), .os_ctrl(l_ctrl[7:0]),
+        .os_eios(l_eios[0]), .os_skp(l_skp[0]), .os_idle2(l_idle2[0]), .rx_err(w8_err),
+        .sl_v(w16_sv), .sl_d(w16_sd), .sl_k(w16_sk), .sl_e(w16_se)
+    );
+    eerie_slot_fifo #(.AW(9)) slot_fifo (
+        .clk(pclk), .rst(p_rst),
+        .i_v(w16_sv), .i_d(w16_sd), .i_k(w16_sk), .i_e(w16_se),
+        .o_va(w8_va), .o_vb(w8_vb), .o_da(w8_da), .o_db(w8_db), .o_ka(w8_ka), .o_kb(w8_kb),
+        .o_ea(w8_ea), .o_eb(w8_eb), .o_ovf(w16_ovf)
+    );
+    assign l_pst[0] = 1'b0;
+    wire        plrx_we, rx_err;
+    wire [81:0] plrx_wd;
+    eerie_pl_rx_ml #(.N(4), .W4_FIXED(1)) rx_ml_w8 (
+        .clk(pclk), .rst(p_rst), .w4(1'b1),
+        .i_va(w8_va), .i_vb(w8_vb), .i_da(w8_da), .i_db(w8_db), .i_ka(w8_ka), .i_kb(w8_kb),
+        .i_erra(w8_ea), .i_errb(w8_eb), .rx_err(w8_mlerr), .pkt_we(plrx_we), .pkt_wd(plrx_wd)
+    );
+    assign rx_err = w8_err || w8_mlerr || w16_ovf;
+    eerie_pl_tx_w16 pl_tx_w16 (
+        .clk(pclk), .rst(p_rst),
+        .mode(lane_en[0] ? tx_mode : M_EIDLE),
+        .ts_link(tx_link), .ts_link_pad(tx_link_pad || tx_link_pad_v[0]),
+        .ts_lane(tx_lane), .ts_lane_pad(tx_lane_pad || tx_lane_pad_v[0]),
+        .ts_nfts(tx_nfts), .ts_rate(tx_rate), .ts_ctrl(tx_ctrl), .scramble_en(pl_descr_en),
+        .gen2(p_rate), .eieos_clr(eieos_clr),
+        .ts_done(l_ts_done[0]), .eios_done(l_eios_done[0]), .idle_pair(l_idle_pair[0]), .busy(l_busy[0]),
+        .pkt_rd_data(pltx_rd_data), .pkt_rd_data2(pltx_rd_data2), .pkt_rd_empty(pltx_rd_empty),
+        .pkt_rd_has2(pltx_rd_has2), .pkt_rd_n(pltx_rd_n),
+        .pipe_txdata(w16_txd), .pipe_txdatak(w16_txk), .pipe_txelecidle(w16_txei)
+    );
+    assign a_txd = w16_txd; assign a_txk = w16_txk;
+    assign a_txei = {8{w16_txei}};
+    assign a_rxpol = {7'd0, rxpol[0]};
+    assign pltx_rd_en = 1'b0;
+    assign l0_pop = 1'b0; assign st_pop = 1'b0;
+    assign st_s0 = 0; assign st_s1 = 0; assign st_k0 = 0; assign st_k1 = 0; assign st_idle = 1'b0; assign st_busy = 1'b0;
+`elsif EERIE_W8
     // ------------------------------------------------------------------
     // TASK-6161 (GateMate): x1 lane on a 64-bit PIPE, 8 symbols per PIPE clock (31.25 MHz at Gen1).
     // PIPE lanes 0..3 carry symbols 0..7 of the one lane (lane 0 = symbols 0,1 = first on the wire);
@@ -273,7 +332,9 @@ module pci_eerie #(
 `endif
 
     eerie_ltssm #(
-`ifdef EERIE_W8
+`ifdef EERIE_W16
+        .US_DIV1(8'd15), .US_DIV2(8'd30),      // TASK-6173: 15.625 / 31.25 MHz
+`elsif EERIE_W8
         .US_DIV1(8'd30),
 `endif
         .MAX_RATE(MAX_RATE), .FAST_TRAIN(FAST), .N_FTS_GEN1(N_FTS_GEN1), .N_FTS_GEN2(N_FTS_GEN2),
@@ -354,7 +415,12 @@ module pci_eerie #(
 
     wire [81:0] plrx_rd_d;
     wire        plrx_rd_empty, plrx_rd;
-    eerie_async_fifo #(.W(82), .AW(4), .PKT_MODE(0)) rx_fifo (
+`ifdef EERIE_1CLK
+    localparam FIFO_SYNC = 1;     // TASK-6173: USERCLK == PIPECLK, the PL <-> DLL FIFOs without synchronizers
+`else
+    localparam FIFO_SYNC = 0;
+`endif
+    eerie_async_fifo #(.W(82), .AW(4), .PKT_MODE(0), .SYNC(FIFO_SYNC)) rx_fifo (
         .wr_clk(pclk), .wr_rst(p_lrst || p_rst), .wr_en(plrx_we), .wr_data(plrx_wd), .wr_last(1'b1), .wr_full(), .wr_free(),
         .rd_clk(uclk), .rd_rst(u_lrst), .rd_en(plrx_rd), .rd_data(plrx_rd_d), .rd_empty(plrx_rd_empty)
     );
@@ -362,11 +428,20 @@ module pci_eerie #(
     wire        pltx_we, pltx_full;
     wire [66:0] pltx_wd;
     wire [7:0]  pltx_free;
-    eerie_async_fifo #(.W(67), .AW(7), .PKT_MODE(1)) tx_fifo (
+`ifdef EERIE_W16
+    eerie_async_fifo2 #(.W(67), .AW(7), .PKT_MODE(1), .SYNC(FIFO_SYNC)) tx_fifo (
+        .wr_clk(uclk), .wr_rst(u_lrst), .wr_en(pltx_we), .wr_data(pltx_wd), .wr_last(pltx_wd[65]),
+        .wr_full(pltx_full), .wr_free(pltx_free),
+        .rd_clk(pclk), .rd_rst(p_lrst || p_rst), .rd_n(pltx_rd_n), .rd_data(pltx_rd_data), .rd_data2(pltx_rd_data2),
+        .rd_empty(pltx_rd_empty), .rd_has2(pltx_rd_has2)
+    );
+`else
+    eerie_async_fifo #(.W(67), .AW(7), .PKT_MODE(1), .SYNC(FIFO_SYNC)) tx_fifo (
         .wr_clk(uclk), .wr_rst(u_lrst), .wr_en(pltx_we), .wr_data(pltx_wd), .wr_last(pltx_wd[65]),
         .wr_full(pltx_full), .wr_free(pltx_free),
         .rd_clk(pclk), .rd_rst(p_lrst || p_rst), .rd_en(pltx_rd_en), .rd_data(pltx_rd_data), .rd_empty(pltx_rd_empty)
     );
+`endif
 
     // ------------------------------------------------------------------
     // data link layer (user clock domain)
@@ -391,19 +466,30 @@ module pci_eerie #(
     wire [12:0] txb_waddr, txb_raddr;
     wire [68:0] txb_wdata;
 
-`ifdef EERIE_W8
+`ifdef EERIE_W16
+    // TASK-6173: 750 user clocks are 24 us at 31.25 MHz (5.0 GT/s); eerie_dll halves it at 2.5 GT/s (15.625 MHz).
+    // An Ack goes out as soon as it is due (openPCIE_BFM rule DL.ACK-LAT: at 15.625 MHz a clock is 16 symbol
+    // times at 2.5 GT/s, the receive -> Ack path is ~40 clocks of the 2588 ns limit)
+    localparam [15:0] UPDFC_P = 16'd750;
+    localparam [7:0]  ACK_DLY = 8'd0;
+`elsif EERIE_W8
+    localparam [7:0]  ACK_DLY = 8'd2;
     // TASK-6170 (openPCIE_BFM rule FC.UPDATE-PERIOD): the user clock is 31.25 MHz with EERIE_W8, not 62.5;
     // 1500 clocks were 48 us (spec: 30 us, +50 %), 750 are 24 us as on the 16-bit path
     localparam [15:0] UPDFC_P = 16'd750;
 `else
+    localparam [7:0]  ACK_DLY = 8'd2;
     localparam [15:0] UPDFC_P = 16'd1500;
 `endif
     eerie_dll #(
         .TXB_AW(TXB_AW), .TXB_RLAT(TXB_RLAT), .MAX_TLP_BEATS(MAX_TLP_BEATS), .NDESC_AW(5),
-        .MAX_UNACKED(MAX_UNACK), .REPLAY_TIMEOUT(REPLAY_T), .ACK_DELAY(8'd2), .UPDFC_PERIOD(UPDFC_P),
+        .MAX_UNACKED(MAX_UNACK), .REPLAY_TIMEOUT(REPLAY_T), .ACK_DELAY(ACK_DLY), .UPDFC_PERIOD(UPDFC_P),
         .CPL_INFINITE(CPL_INF)
     ) dll (
         .clk(uclk), .rst(u_rst), .link_up(u_link_up), .link_l0(u_in_l0),
+`ifdef EERIE_W16
+        .link_gen2(u_rate),
+`endif
         .dl_up(dl_up), .dl_init(dl_init), .retrain_req(u_retrain),
         .plrx_d(plrx_rd_d), .plrx_empty(plrx_rd_empty), .plrx_rd(plrx_rd),
         .pltx_we(pltx_we), .pltx_wd(pltx_wd), .pltx_full(pltx_full), .pltx_free(pltx_free),

@@ -13,6 +13,9 @@ module m2_pcie_top #(
     input  clk_i,
     input  perst_n,
     output clkreq_n
+`ifdef M2_LED
+   ,output [7:0] led
+`endif
 );
     assign clkreq_n = 1'b0;
 
@@ -52,4 +55,13 @@ module m2_pcie_top #(
         .pipe_txdata(txd), .pipe_txdatak(txk), .pipe_txelecidle(txei), .pipe_txcompliance(txc),
         .pipe_powerdown(pd), .pipe_txdetectrx(det), .pipe_rxpolarity(pol), .pipe_rate(),
         .ltssm(ltssm), .phy_lnk_up(phylnk), .lnk_up(lnk));
+
+`ifdef M2_LED
+    // TASK-6172: v001 LEDs (active high) for bring-up on camera j1
+    //   0 PHY ready (PLL, TX reset done)   1 RX reset done (CDR)   2 comma aligned   3 PERST# released
+    //   4 LTSSM in Polling/Configuration   5 LTSSM L0              6 DL up           7 PCLK heartbeat ~1 Hz
+    reg [24:0] hb = 25'd0;
+    always @(posedge pclk) hb <= hb + 1'b1;
+    assign led = {hb[24], lnk, ltssm == 6'h16, ltssm >= 6'h04 && ltssm < 6'h16, ps[2], dbg[5], dbg[3], phy_rdy};
+`endif
 endmodule
