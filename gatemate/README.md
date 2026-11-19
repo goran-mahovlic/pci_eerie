@@ -135,6 +135,11 @@ syn/equiv_t6173.sh                                              # default and EE
 SEED=1 syn/w16_pnr.sh W16A_s1                                   # CCGM1A1 at 31.25 MHz
 ```
 
+Place and route: W16 does **not** route on the CCGM1A1 at 31.25 MHz. Synthesis gives 33 231 CPE_LT (81 %);
+nextpnr (seeds 1 and 2) did not converge, overused wires bottomed out at 13 392 / 27 070 and then grew to 27 223 /
+42 496 before the runs were stopped (`mjerenja/W16B_s1.txt`, `W16B_s2.txt`). Gen2 on hardware needs a smaller W16
+or a CCGM1A2; Gen2 is proven in simulation only. `EERIE_W8` (Gen1) remains the hardware build.
+
 Results: `REPORT_GEN2_W16_HR.md` (report, Croatian), `UPSTREAM_GEN2_W16.md` (issue / PR drafts, limits), `mjerenja/t6173/`.
 
 ## Build / measure

@@ -49,6 +49,8 @@ Branch `gatemate-w16` (on top of `gatemate-w8`). All build options; without defi
 * At 2.5 GT/s the W16 user clock is 15.625 MHz: under back-to-back TLPs an Ack can wait behind a TLP and exceed
   the Ack latency limit (openPCIE_BFM DL.ACK-LAT, by 12 .. 600 ns); the 64-bit W8 build shows the same class at Gen1
   in the tester. Light traffic and 5.0 GT/s pass.
+* Simulation only: on the CCGM1A1 the W16 endpoint (81 % CPE) does not route at 31.25 MHz with nextpnr; a hardware
+  Gen2 build needs a smaller W16 or the CCGM1A2. 5.0 Gb/s on CC_SERDES (OUTDIV 1) is not yet shown on silicon.
 
 ## 4. chili-chips/openSERDES_BFM — note (no issue needed)
 

@@ -16,7 +16,7 @@ grana **gatemate-w16** (na gatemate-w8). Mjerenja: `mjerenja/t6173/`.
 | Sim A7RC (Gen2) serijski → openSERDES_BFM → W16: trening 2,5, promjena na 5,0, L0 na 5,0, CfgRd/BAR0, 59 pravila | ✅ 59 pravila, 0 kršenja, RC MODEL RESULT PASS | `reg16_summary.txt` |
 | svih 16 položaja COM-a | ✅ 16/16 na 2,5 **i** 16/16 na 5,0 GT/s (61 PASS pokretanje) | `com16.txt`, `shift16.txt` |
 | odvojeni taktovi ±300/±600 ppm (M2 v001 vlastiti oscilator) | ✅ EB16: 0, ±300, ±600, ±1000 ppm (FAST), ±600 (ACCURATE), oba sparivanja | `reg16_summary.txt` |
-| sinteza + P&R W16 na A1 @31,25 MHz | ⏳ sinteza gotova: 33 231 CPE_LT (81 %); P&R (seed 1, 2) u tijeku | `build/gm/W16B_s*/synth.log`, `mjerenja/W16B_s*.txt` kad završi |
+| sinteza + P&R W16 na A1 @31,25 MHz | ❌ **ne rutira**: sinteza 33 231 CPE_LT (81 %); P&R seed 1 i 2 ne konvergira (preopterećene žice rastu), prekinuto 19. 11. 12:50 | `mjerenja/W16B_s1.txt`, `mjerenja/W16B_s2.txt` |
 | uzvodni bug pronađen simulacijom | pci_eerie LTSSM ne prati smanjenje brzine (5→2,5) — popravak `EERIE_LTSSM_SPDDN`, EN nacrt issuea | `docs/UPSTREAM_GEN2_W16_EN.md` |
 
 ## 1. Arhitektura W16
@@ -67,7 +67,13 @@ stane, nakon `BHV_PLL_LOCK_TIME_NS` (500 ns) se vrati na novoj brzini, reset sek
 |---|---|---|---|---|
 | W8 F1 (TASK-6161, referenca) | 20 662 (50 %) | 7 383 | 19 | 31,35 / 33,25 MHz PASS |
 | W16A (prva FIFO2 izvedba, FF) | 50 630 (**123 %**) | 17 854 | 21 | ne stane |
-| W16B (FIFO2 u BRAM, konačni RTL) | 33 231 (81 %) | — | — | P&R u tijeku |
+| W16B (FIFO2 u BRAM, konačni RTL) | 33 231 (81 %) | — | — | **ne rutira** — s1: min 13 392 preopterećenih žica (iter 22), iter 54 → 27 223; s2: min 27 070 (iter 16), iter 39 → 42 496; raste, prekinuto 19. 11. 12:50 |
+
+**Zaključak P&R (19. 11. 12:50):** W16 na CCGM1A1 ne rutira na 31,25 MHz — kod 81 % CPE-a rutiranje ne konvergira
+(oba seeda nakon minimuma oko iter 16–22 preopterećenje raste). Za Gen2 na HW treba **manji W16** (npr. uži
+pl_rx_w16 / slot_fifo, DLL/TL dijeljeni s W8 bez dupliciranja) **ili CCGM1A2**. Novo rutiranje W16 bez naloga se ne
+pokreće. Goran 19. 11.: **Gen1 je za sada dovoljan** (framebuffer s Pija) — W8 ostaje put za HW; Gen2 W16 ostaje
+dokazan samo u simulaciji (§5).
 
 Po modulima (yosys synth_gatemate, sam modul): pl_rx_w16 2 641 DFF / 1 184 MX4 (W8: 1 455 / 338), pl_tx_w16
 532 / 113 (W8: 284 / 44), slot_fifo 423 DFF + 2 BRAM_40K, fifo2 314 DFF + 2 BRAM_40K (`modul_stat.txt`).
