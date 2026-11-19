@@ -1,0 +1,28 @@
+cc_seed1 | PASS | Checker: 59 rules, 0 violations | L0 at 86.845 us | COM lanes 7 610 7 7 8 585 7 6 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed2 | PASS | Checker: 59 rules, 0 violations | L0 at 86.845 us | COM lanes 7 610 7 7 8 585 7 6 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed3 | PASS | Checker: 59 rules, 0 violations | L0 at 86.749 us | COM lanes 7 6 7 610 7 7 6 586 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed4 | PASS | Checker: 59 rules, 0 violations | L0 at 86.845 us | COM lanes 7 610 7 7 8 585 7 6 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed5 | PASS | Checker: 59 rules, 0 violations | L0 at 86.845 us | COM lanes 7 610 7 7 8 585 7 6 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed6 | PASS | Checker: 59 rules, 0 violations | L0 at 86.749 us | COM lanes 7 6 586 7 6 7 610 7 | rx_err L0 0, all 0; RxStatus SKP+ 0 SKP- 0 err 0 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed7 | PASS | Checker: 59 rules, 0 violations | L0 at 86.813 us | COM lanes 610 7 7 8 585 7 6 7 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed8 | PASS | Checker: 59 rules, 0 violations | L0 at 86.749 us | COM lanes 6 7 610 7 7 6 585 7 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed9 | PASS | Checker: 59 rules, 0 violations | L0 at 86.845 us | COM lanes 7 610 7 7 8 585 7 6 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed10 | PASS | Checker: 59 rules, 0 violations | L0 at 86.749 us | COM lanes 7 6 7 610 7 7 6 586 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed11 | PASS | Checker: 59 rules, 0 violations | L0 at 86.813 us | COM lanes 610 7 7 8 585 7 6 7 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+cc_seed12 | PASS | Checker: 59 rules, 0 violations | L0 at 86.749 us | COM lanes 586 7 6 7 610 7 7 6 | rx_err L0 0, all 0; RxStatus SKP+ 0 SKP- 0 err 0 under 0; RX buffer errors 0; ppm 0 | fails: none
+eb2_ppm0 | PASS | Checker: 59 rules, 0 violations | L0 at 88.573 us | COM lanes 7 631 7 7 8 585 7 6 | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 0 | fails: none
+eb2_ppm300 | none | - | L0 at never |  |  | fails: none
+eb2_ppm-300 | none | - | L0 at never |  |  | fails: none
+eb2_ppm600 | none | - | L0 at never |  |  | fails: none
+eb2_ppm-600 | none | - | L0 at never |  |  | fails: none
+eb2_ppm1000 | none | - | L0 at never |  |  | fails: none
+eb2_ppm-1000 | none | - | L0 at never |  |  | fails: none
+eb2acc_ppm600 | none | - | L0 at never |  |  | fails: none
+eb2acc_ppm-600 | none | - | L0 at never |  |  | fails: none
+cc_ppm300 | none | - | L0 at never |  |  | fails: none
+cc_ppm-300 | none | - | L0 at never |  |  | fails: none
+tester_seed1 | none | - | L0 at 87.165 us |  |  | fails: none
+tester_seed2 | none | - | L0 at 87.293 us |  |  | fails: none
+tester_seed3 | none | - | L0 at 87.229 us |  |  | fails: none
+tester_seed4 | none | - | L0 at 87.741 us |  |  | fails: none
+REG_DONE 2026-11-18T21:17:07+00:00

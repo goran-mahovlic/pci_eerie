@@ -10,7 +10,8 @@
 // RW podaci se spremaju i vraćaju kako stignu, pa zapis+čitanje daju istu vrijednost; RO se okreću (bswap).
 `timescale 1ns / 1ps
 module eerie_bar0_app #(
-    parameter [31:0] ID_WORD = 32'h4C44_0E1E    // "LD" + eerie
+    parameter [31:0] ID_WORD = 32'h4C44_0E1E,   // "LD" + eerie
+    parameter [3:0]  ADDR_XOR = 4'd0            // TASK-6170: 8 = RO registers at 0x20..0x28, 0x00..0x1C scratch
 ) (
     input             clk,
     input             rst,
@@ -63,13 +64,17 @@ module eerie_bar0_app #(
 
     // TLP nosi bajt 0 u [31:24] DW-a; RO vrijednosti se okreću da ih CPU (little-endian) čita kako piše
     function [31:0] bswap(input [31:0] v); bswap = {v[7:0], v[15:8], v[23:16], v[31:24]}; endfunction
-    function [31:0] rd_reg(input [3:0] a);
+    function [3:0] lx(input [3:0] a); lx = a ^ ADDR_XOR; endfunction
+    function [31:0] rd_reg(input [3:0] pa);
+        reg [3:0] a;
+        begin a = lx(pa);
         case (a)
         4'd0: rd_reg = bswap(ID_WORD);
         4'd1: rd_reg = bswap(cnt);
         4'd2: rd_reg = bswap({18'd0, ltssm, 7'd0, lnk_up});
         default: rd_reg = regs[a];
         endcase
+        end
     endfunction
 
     always @(posedge clk) begin
@@ -88,7 +93,7 @@ module eerie_bar0_app #(
                 // 3DW: [63:32]=adresa, [31:0]=podatak (MWr32); 4DW: [31:0]=niža adresa
                 ridx <= is_64 ? trn_rd[5:2] : trn_rd[37:34];
                 req_low <= is_64 ? trn_rd[6:0] : trn_rd[38:32];
-                if (!is_64 && is_wr && ok && trn_rd[37:34] > 4'd2) regs[trn_rd[37:34]] <= trn_rd[31:0];
+                if (!is_64 && is_wr && ok && lx(trn_rd[37:34]) > 4'd2) regs[lx(trn_rd[37:34])] <= trn_rd[31:0];
                 if (!is_wr && ok) begin
                     cpl_req <= 1'b1;
                     cpl_data <= rd_reg(is_64 ? trn_rd[5:2] : trn_rd[37:34]);
@@ -98,7 +103,7 @@ module eerie_bar0_app #(
                 rs <= trn_reof ? R_IDLE : R_DATA;
             end
             R_DATA: begin
-                if (is_64 && is_wr && ok && ridx > 4'd2) regs[ridx] <= trn_rd[63:32];
+                if (is_64 && is_wr && ok && lx(ridx) > 4'd2) regs[lx(ridx)] <= trn_rd[63:32];
                 rs <= trn_reof ? R_IDLE : R_DROP;
             end
             default: if (trn_reof) rs <= R_IDLE;

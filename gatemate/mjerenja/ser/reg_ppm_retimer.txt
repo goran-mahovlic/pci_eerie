@@ -1,0 +1,11 @@
+eb2_ppm300 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 25 err 1 under 0; RX buffer errors 0; ppm 300 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +27 -0) | fails: none | first: none
+eb2_ppm-300 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 0; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm -300 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +0 -24) | fails: none | first: none
+eb2_ppm600 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 0; RxStatus SKP+ 0 SKP- 53 err 1 under 0; RX buffer errors 0; ppm 600 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +57 -0) | fails: none | first: none
+eb2_ppm-600 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 0; RxStatus SKP+ 32 SKP- 0 err 1 under 0; RX buffer errors 0; ppm -600 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +0 -54) | fails: none | first: none
+eb2_ppm1000 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 0; RxStatus SKP+ 0 SKP- 60 err 1 under 0; RX buffer errors 0; ppm 1000 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +97 -0) | fails: none | first: none
+eb2_ppm-1000 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 1; RxStatus SKP+ 48 SKP- 0 err 1 under 0; RX buffer errors 0; ppm -1000 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +0 -93) | fails: none | first: none
+eb2acc_ppm600 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 0; RxStatus SKP+ 0 SKP- 53 err 1 under 0; RX buffer errors 0; ppm 600 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +57 -0) | fails: none | first: none
+eb2acc_ppm-600 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 0; RxStatus SKP+ 31 SKP- 0 err 1 under 0; RX buffer errors 0; ppm -600 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +0 -54) | fails: none | first: none
+cc_ppm300 | PASS | Checker: 59 rules, 0 violations | rx_err L0 0, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 0; ppm 300 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +27 -0) | fails: none | first: none
+cc_ppm-300 | PASS | Checker: 59 rules, 0 violations | rx_err L0 1, all 1; RxStatus SKP+ 0 SKP- 0 err 1 under 0; RX buffer errors 1; ppm -300 | EP LTSSM 0x16 lnk_up 1; retimer 1 (EP->RC SKP +0 -24) | fails: none | first: none
+PPM_DONE 2026-11-18T21:13:16+00:00

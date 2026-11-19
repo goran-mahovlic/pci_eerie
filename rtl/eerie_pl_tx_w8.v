@@ -79,6 +79,14 @@ module eerie_pl_tx_w8 #(
             wscr = scramble_en ? 8'hFF : 8'd0;
         end else if (mode == M_EIDLE) begin
             weidle = 1'b1;
+`ifdef EERIE_W8_SKP1
+        // TASK-6170 (openPCIE_BFM rule PL.SKP): in L0 two SKP OSs per interval are one per 600 symbols;
+        // send one SKP OS and 4 symbols of logical idle (COM resets the LFSR, SKP does not advance it)
+        end else if (skp_pend != 3'd0 && (mode == M_DATA || mode == M_IDLE)) begin
+            take_skp = 1'b1;
+            w = bytes8(K_COM, K_SKP, K_SKP, K_SKP, 8'h00, 8'h00, 8'h00, 8'h00); wk = 8'h0F;
+            wcom = 8'h01; wskp = 8'h0E; wscr = scramble_en ? 8'hF0 : 8'd0;
+`endif
         end else if (skp_pend != 3'd0 && mode != M_EIOS) begin
             take_skp = 1'b1;
             w = bytes8(K_COM, K_SKP, K_SKP, K_SKP, K_COM, K_SKP, K_SKP, K_SKP); wk = 8'hFF;

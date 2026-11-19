@@ -368,6 +368,14 @@ module eerie_dll #(
     reg [15:0] updfc_timer;
     reg [2:0]  updfc_pend;
     reg [1:0]  initfc_rr;
+`ifdef EERIE_DLL_FCSET
+    // TASK-6170 (openPCIE_BFM rule FC.INIT-ORDER): the InitFC type (1 or 2) is chosen at the start of a
+    // set (P), so a set started in FC_INIT1 ends as InitFC1 and the InitFC2 sets start with P
+    reg        fc_set2;
+    wire       fc2_now = (initfc_rr == 2'd0) ? (dls == DL_FC2) : fc_set2;
+`else
+    wire       fc2_now = (dls == DL_FC2);
+`endif
 
     wire [DW_-1:0] dsend = desc[s_ptr[NDESC_AW-1:0]];
     wire [TXB_AW:0] ds_start = dsend[TXB_AW:0];
@@ -558,10 +566,13 @@ module eerie_dll #(
                     if (fifo_dllp_ok && pltx_free >= 8'd124) begin
                         ts <= T_DLLP;
                         initfc_rr <= (initfc_rr == 2'd2) ? 2'd0 : initfc_rr + 1'b1;
+`ifdef EERIE_DLL_FCSET
+                        fc_set2 <= fc2_now;
+`endif
                         case (initfc_rr)
-                        2'd0: dllp_word <= mk_fc(dls == DL_FC1 ? 4'h4 : 4'hC, fc_ph, fc_pd);
-                        2'd1: dllp_word <= mk_fc(dls == DL_FC1 ? 4'h5 : 4'hD, fc_nph, fc_npd);
-                        default: dllp_word <= mk_fc(dls == DL_FC1 ? 4'h6 : 4'hE,
+                        2'd0: dllp_word <= mk_fc(!fc2_now ? 4'h4 : 4'hC, fc_ph, fc_pd);
+                        2'd1: dllp_word <= mk_fc(!fc2_now ? 4'h5 : 4'hD, fc_nph, fc_npd);
+                        default: dllp_word <= mk_fc(!fc2_now ? 4'h6 : 4'hE,
                                                     CPL_INFINITE ? 8'd0 : fc_cplh, CPL_INFINITE ? 12'd0 : fc_cpld);
                         endcase
                     end

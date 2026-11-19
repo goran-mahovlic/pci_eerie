@@ -39,6 +39,10 @@ SerDes. `EERIE_W8` moves the x1 lane to 8 symbols per clock (64-bit PIPE at 31.2
 | `EERIE_SCR8_MAT` | eerie_scr8 | LFSR candidates as flat matrices (`eerie_lfsrmat.vh`, `gen_lfsr_mat.py`) |
 | `EERIE_SCR8_PTREE` | eerie_scr8 | per-symbol advance counts as balanced popcounts |
 | `EERIE_SKP_EB2` | eerie_skp_eb | insert and remove SKP on the write side, read side is a plain FIFO |
+| `EERIE_W8_SKP1` | eerie_pl_tx_w8 | in L0 one SKP OS + 4 logical idle symbols per interval (was two SKP OSs: one per 600 symbols, PL.SKP) |
+| `EERIE_DLL_FCSET` | eerie_dll | the InitFC type is chosen at the start of a set, so InitFC2 sets start with P (FC.INIT-ORDER) |
+
+With `EERIE_W8` the UpdateFC period is 750 user clocks (24 us at 31.25 MHz; 1500 were 48 us, FC.UPDATE-PERIOD).
 
 Measured numbers (yosys + nextpnr-himbaechel, oss-cad-suite 2026-11-17, CCGM1A1, seed 1/2):
 `gatemate/mjerenja/*.txt`, table: `python3 gatemate/syn/tablica.py`. Summary in the section
@@ -63,6 +67,35 @@ receive symbols by N (0..7) to cover every comma position. Checks: L0 (LTSSM 0x1
 CfgRd vendor/device ID, BAR0 sizing, CfgWr, MRd/MWr on BAR0 (BAR0 application from
 `gatemate/rtl/eerie_bar0_app.v`), and **no receiver error in L0** (a broken DLLP check is otherwise
 hidden: the link recovers and the transactions still pass).
+
+## Serial line: openPCIE_BFM RC -> openSERDES_BFM -> eerie (TASK-6170)
+
+One `ccfpga_serdes` instance in `rtl/eerie_ccs_phy.v` (PIPE glue: PCLK = PLL clock, PhyStatus, RxStatus,
+receiver detection, electrical idle, polarity; `SRNS=1`: RX_CLK_I = RX_CLK_O and the SKP elastic buffer).
+The file list picks `ext/openSERDES_BFM/1.gatemate/1.model/ccfpga_serdes.BFM.sv` in simulation and
+`ccfpga_serdes.SYNTH.sv` (CC_SERDES) for the chip. The host is openPCIE_BFM's Artix-7 RC model on the serial
+line (`PcieVhostSerial`, 59 PCIe rules). Both BFMs are git submodules (`ext/`), simulation only for openPCIE_BFM
+(its pcieVHost / VProc parts are GPL-3.0-or-later; nothing of it is in the RTL or the bitstream).
+
+```
+git submodule update --init --recursive
+sim/ser/run_ser.sh build && sim/ser/run_ser.sh run                  # Verilator: RC MODEL RESULT: PASS, 59 rules, 0 violations
+sim/ser/run_ser.sh run +verilator+seed+7                            # the BFM picks the RX word phase from the seed
+SRNS=1 sim/ser/run_ser.sh build && SRNS=1 sim/ser/run_ser.sh run +ppm=-600   # EP reference 600 ppm fast, SKP elastic buffer
+A7RC=0 sim/ser/run_ser.sh build && A7RC=0 sim/ser/run_ser.sh run    # the RC model's random tester
+sim/ser/reg_ser.sh; sim/ser/reg_ppm.sh                              # the regression (summary.txt under build/sim/)
+```
+
+`+ppm=N` puts the EP SerDes reference N ppm off; pcieVHost's serial receiver has no clock recovery, so the
+EP -> RC line then goes through `sim/ser/ser_retimer.sv` (test bench only). Results (`mjerenja/ser/`):
+12 seeds PASS (the COM in all 8 lanes of the word); EB2 at +-300, +-600, +-1000 ppm (FAST CDR) and +-600 (ACCURATE)
+PASS, no receiver error in L0. What the models found and what was fixed: `REPORT_SERDES_BFM.md`.
+
+## ULX5M-M2 top with CC_SERDES
+
+`rtl/m2_pcie_top.v`: `eerie_ccs_phy` (SRNS = 1: the M2 runs on its own oscillator) + `eerie_w8_ep`, PERST# on
+IO_SA_A1, CLKREQ# (IO_SA_B3) held low. SerDes: 2.5 Gb/s from 100 MHz, the GS<->M2 2.5G link recipe.
+`SEED=1 SRNS=1 syn/m2_pcie.sh M2B_s1` (yosys + nextpnr `--tmg-ripup` + `gmpack --reset`).
 
 ## Build / measure
 
@@ -98,10 +131,12 @@ through a shift-register harness (`gen_harness.py`), so all paths are register t
   For comparison, the stock x1 path (16-bit PIPE at 125 MHz) reaches 27.6 MHz on GateMate, and
   openCologne-PCIE (chili-chips) measured with the same flow: PHY+MAC 21-23 MHz FAIL, its DLL alone
   68 362 CPE_LT (166 % of the device).
-- Hardware: **not tested on a board yet.** No `CC_SERDES` top level is in this branch yet; the
-  analog setup (2.5 Gb/s, 8b10b, comma alignment) follows the ULX5M-GS <-> M2 SerDes link tests.
+- Hardware: **not tested on a board yet.** The `CC_SERDES` top level for the ULX5M-M2 is `rtl/m2_pcie_top.v`
+  (TASK-6170); the analog setup (2.5 Gb/s) follows the ULX5M-GS <-> M2 SerDes link tests.
 - SKP elastic buffer: one SKP per SKP ordered set, i.e. 650..850 ppm capacity (SKP interval
-  1180..1538 symbols) - enough for +-600 ppm (two +-300 ppm reference clocks), fails at +-1000 ppm.
+  1180..1538 symbols) - enough for +-600 ppm (two +-300 ppm reference clocks), fails at +-1000 ppm in the unit
+  test. On the serial line against the RC model +-1000 ppm passes (that host sends SKP more often than the
+  slowest allowed interval), so +-1000 is not a guarantee.
 
 ## Default behaviour
 

@@ -1,0 +1,15 @@
+# M2C_s1: m2_pcie_top SRNS=1 seed=1 pnr='--tmg-ripup' lanac=oss-cad-suite-20261117 2026-11-18T23:10:56+00:00 (5131 s)
+  # PREKINUTO ručno (kill, TASK-6170): rutiranje nije konvergiralo (~9-11k preklapanja nakon 40+ iteracija) — Fmax iz nedovršenog rutiranja, samo procjena
+  IOSEL:       3/    162     1%
+  GPIO:       3/    162     1%
+  CLKIN:       1/      1   100%
+  GLBOUT:       1/      1   100%
+  SERDES:       1/      1   100%
+  CPE_LT:   26142/  40960    63%
+  CPE_FF:    9458/  40960    23%
+  CPE_RAMIO:    1754/  40960     4%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock  '$iopadmap$clk_i': 104.03 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock       'ep.app.clk': 19.69 MHz (FAIL at 31.25 MHz)
+  POSTROUTEMax frequency for clock 'phy.g_eb.eb.wclk': 30.52 MHz (FAIL at 31.25 MHz)
+nextpnr rc=143

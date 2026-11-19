@@ -391,9 +391,16 @@ module pci_eerie #(
     wire [12:0] txb_waddr, txb_raddr;
     wire [68:0] txb_wdata;
 
+`ifdef EERIE_W8
+    // TASK-6170 (openPCIE_BFM rule FC.UPDATE-PERIOD): the user clock is 31.25 MHz with EERIE_W8, not 62.5;
+    // 1500 clocks were 48 us (spec: 30 us, +50 %), 750 are 24 us as on the 16-bit path
+    localparam [15:0] UPDFC_P = 16'd750;
+`else
+    localparam [15:0] UPDFC_P = 16'd1500;
+`endif
     eerie_dll #(
         .TXB_AW(TXB_AW), .TXB_RLAT(TXB_RLAT), .MAX_TLP_BEATS(MAX_TLP_BEATS), .NDESC_AW(5),
-        .MAX_UNACKED(MAX_UNACK), .REPLAY_TIMEOUT(REPLAY_T), .ACK_DELAY(8'd2), .UPDFC_PERIOD(16'd1500),
+        .MAX_UNACKED(MAX_UNACK), .REPLAY_TIMEOUT(REPLAY_T), .ACK_DELAY(8'd2), .UPDFC_PERIOD(UPDFC_P),
         .CPL_INFINITE(CPL_INF)
     ) dll (
         .clk(uclk), .rst(u_rst), .link_up(u_link_up), .link_l0(u_in_l0),

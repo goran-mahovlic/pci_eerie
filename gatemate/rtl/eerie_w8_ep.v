@@ -2,7 +2,8 @@
 // Endpoint x1 Gen1, PIPE 64 bita (TASK-6161): eerie_w8_core + BAR0 aplikacija (TASK-6160). Neovisno o FPGA-u; PHY omotač je izvan.
 `timescale 1ns / 1ps
 module eerie_w8_ep #(
-    parameter FAST_TRAIN = "FALSE"
+    parameter FAST_TRAIN = "FALSE",
+    parameter [3:0] ADDR_XOR = 4'd0      // BAR0 application layout (eerie_bar0_app)
 ) (
     input         pclk,
     input         uclk,
@@ -43,7 +44,7 @@ module eerie_w8_ep #(
         .ltssm(ltssm), .phy_lnk_up(phy_lnk_up)
     );
 
-    eerie_bar0_app app (
+    eerie_bar0_app #(.ADDR_XOR(ADDR_XOR)) app (
         .clk(uclk), .rst(urst),
         .trn_rd(rd), .trn_rrem(rrem), .trn_rsof(rsof), .trn_reof(reof), .trn_rsrc_rdy(rsrc), .trn_rbar_hit(bar),
         .trn_rdst_rdy(rdst), .trn_td(td), .trn_trem(trem), .trn_tsof(tsof), .trn_teof(teof), .trn_tsrc_rdy(tsrc),

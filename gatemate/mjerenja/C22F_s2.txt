@@ -1,0 +1,12 @@
+# C22F_s2: netlist build/gm/M2F_s2/top.json (a4102a5f8f38) seed=2 pnr='--tmg-ripup' nextpnr="nextpnr-himbaechel" -- Next Generation Place and Route (Version nextpnr-0.11.1-111-gc22d0709) 2026-11-18T23:58:50+00:00 (2206 s)
+  SERDES:       1/      1   100%
+  CPE_LT:   21088/  40960    51%
+  CPE_FF:    7511/  40960    18%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock      'ep.app.clk': 31.68 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock '$iopadmap$clk_i': 127.03 MHz (PASS at 31.25 MHz)
+Info: 1 Hold/min time violations (showing 10 worst paths):
+ERROR: Hold/min time violation for clock 'posedge ep.app.clk':
+nextpnr rc=1
+  zadnja iteracija: iter=134 wires=1109378 overused=0 overuse=0 resources=60395 overused=0 overuse=0 tmgfail=0 archfail=0
+  bit build/gm/C22F_s2/C22F_s2.bit 892638 B sha256 2238dcd0cbe14647

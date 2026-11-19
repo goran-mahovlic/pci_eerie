@@ -1,0 +1,9 @@
+shift 0: PASS 6/6 (EP LTSSM 0x16)
+shift 1: PASS 6/6 (EP LTSSM 0x16)
+shift 2: PASS 6/6 (EP LTSSM 0x16)
+shift 3: PASS 6/6 (EP LTSSM 0x16)
+shift 4: PASS 6/6 (EP LTSSM 0x16)
+shift 5: PASS 6/6 (EP LTSSM 0x16)
+shift 6: PASS 6/6 (EP LTSSM 0x16)
+shift 7: PASS 6/6 (EP LTSSM 0x16)
+W8REG_DONE

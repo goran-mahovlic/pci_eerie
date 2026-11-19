@@ -1,0 +1,4 @@
+# TASK-6170: ULX5M-M2 v001 (iz ulx5m-gs-m2-serdes gateware/ber/top_m2c.ccf, TASK-5901)
+NET "clk_i"   Loc = "IO_SB_A8" | SCHMITT_TRIGGER=true;
+NET "clkreq_n" Loc = "IO_SA_B3";
+NET "perst_n"  Loc = "IO_SA_A1";

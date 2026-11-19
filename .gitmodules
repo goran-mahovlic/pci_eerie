@@ -1,3 +1,9 @@
 [submodule "ext/pcie_7x"]
 	path = ext/pcie_7x
 	url = https://github.com/regymm/pcie_7x.git
+[submodule "gatemate/ext/openSERDES_BFM"]
+	path = gatemate/ext/openSERDES_BFM
+	url = https://github.com/chili-chips/openSERDES_BFM
+[submodule "gatemate/ext/openPCIE_BFM"]
+	path = gatemate/ext/openPCIE_BFM
+	url = https://github.com/chili-chips/openPCIE_BFM
