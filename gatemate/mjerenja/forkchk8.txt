@@ -1,0 +1,13 @@
+# forkchk8: m2_pcie_top SRNS=0 seed=1 pnr='--tmg-ripup' lanac=oss-cad-suite-20261119 2026-11-25T08:09:04+00:00 (384 s)
+  IOSEL:      11/    162     6%
+  GPIO:      11/    162     6%
+  CLKIN:       1/      1   100%
+  GLBOUT:       1/      1   100%
+  SERDES:       1/      1   100%
+  CPE_LT:   21136/  40960    51%
+  CPE_FF:    7536/  40960    18%
+  CPE_RAMIO:    1761/  40960     4%
+  RAM_HALF:      19/     64    29%
+  POSTROUTEMax frequency for clock      'ep.app.clk': 32.25 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock '$iopadmap$clk_i': 110.90 MHz (PASS at 31.25 MHz)
+  bit build/gm/forkchk8/forkchk8.bit 762163 B sha256 89d78ac800741569

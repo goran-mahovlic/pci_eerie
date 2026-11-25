@@ -1,0 +1,6 @@
+krugova 1700000 ok 1700000 krivo 0 nijem 0 za 197.6 s
+niz 2: krugova 2005193 MWr 4010386 krivo 0 nijem 0 za 30.0 s
+niz 8: krugova 570837 MWr 4566696 krivo 0 nijem 0 za 30.0 s
+niz 16: krugova 544961 MWr 8719376 krivo 0 nijem 0 za 30.0 s
+niz 64: krugova 394 MWr 25216 krivo 0 nijem 1 za 0.3 s
+CE cist
