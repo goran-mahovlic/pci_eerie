@@ -57,6 +57,7 @@ module eerie_ccs_phy16 #(
     wire tx_rdone, rx_rdone, det_done, present, tx_buf_err, rx_buf_err, aligned, ei_raw;
     wire [63:0] s_rxd; wire [7:0] s_rxk, s_nit, s_disp;
     wire [15:0] rf_do; wire rf_rdy;
+    wire        rx_wd_rst;                // TASK-6241 EERIE_PHY_RXWD
     reg         rf_en = 1'b0; reg [7:0] rf_addr = 8'h0; reg [15:0] rf_mask = 16'h0, rf_di = 16'h0;
 
     // ---------------- clocks ----------------
@@ -159,7 +160,13 @@ module eerie_ccs_phy16 #(
         .RX_BUF_BYPASS(0), .RX_CLKCOR_USE(1'b0),
         .RX_EI_BIAS(4'h4), .RX_EI_BW_SEL(4'h4),
         .RX_WAIT_CDR_LOCK(1'b0), .RX_RESET_TIMER_PRESC(5'h4),
-        .RX_RTERM_VCMSEL(3'h3), .RX_EN_EQA(1'b1), .RX_EQA_LOCK_CFG(4'hC),
+        .RX_RTERM_VCMSEL(3'h3),
+`ifdef EERIE_PHY_NOEQA
+        .RX_EN_EQA(1'b0),   // TASK-6241: fixed RX equalizer (AFE peak / gain as set), no adaptation at 5 GT/s
+`else
+        .RX_EN_EQA(1'b1),
+`endif
+        .RX_EQA_LOCK_CFG(4'hC),
         .RX_AFE_PEAK(5'h18), .RX_AFE_GAIN(4'h0), .RX_AFE_VCMSEL(3'h3),
         .RX_CDR_CKP(RX_CDR_CKP), .RX_CDR_CKI(8'h00), .RX_CDR_LOCK_CFG(8'hD5),
         .RX_CALIB_OVR(1'b1), .RX_CALIB_VAL(4'h0), .TX_CALIB_OVR(1'b1), .TX_CALIB_VAL(4'h0),
@@ -183,7 +190,7 @@ module eerie_ccs_phy16 #(
         .tx_8b10b_en_i(1'b1), .tx_8b10b_bypass_i(8'h00), .tx_char_dispmode_i(8'h00), .tx_char_dispval_i(8'h00),
         .tx_buf_err_o(tx_buf_err), .tx_resetdone_o(tx_rdone),
         .rx_detect_done_o(det_done), .rx_present_o(present), .TERM_SERIO_O(),
-        .rx_reset_i(!rst_n), .rx_pma_reset_i(1'b0), .rx_eqa_reset_i(1'b0), .rx_cdr_reset_i(1'b0),
+        .rx_reset_i(!rst_n || rx_wd_rst), .rx_pma_reset_i(1'b0), .rx_eqa_reset_i(1'b0), .rx_cdr_reset_i(1'b0),
         .rx_pcs_reset_i(1'b0), .rx_buf_reset_i(rx_buf_rst),
         .rx_prbs_sel_i(3'b000), .rx_prbs_cnt_reset_i(1'b0), .rx_powerdown_n_i(1'b1),
         .rx_en_ei_detector_i(1'b1), .rx_comma_detect_en_i(1'b1), .rx_slide_i(1'b0),
@@ -229,6 +236,27 @@ module eerie_ccs_phy16 #(
     reg [2:0] eip = 3'b111;
     always @(posedge pclk) eip <= {eip[1:0], ei_raw};
 
+`ifdef EERIE_PHY_RXWD
+    // TASK-6241 (M2 v002 at 5 GT/s): the RX can go deaf with RxValid high (aligned, not idle): the host sees no Ack
+    // (replay Timeout + Rollover, no receive errors of its own) and the EP never locks again in Recovery. Watchdog:
+    // RxValid for 4096 PCLKs without a word that has a COM and no decode error (L0: a SKP OS every ~75 PCLKs at
+    // 5.0 GT/s, training: every PCLK) -> SerDes RX reset for 16 PCLKs, then the next 4096.
+    reg [12:0] wd_cnt = 13'd0; reg [4:0] wd_rst = 5'd0; reg wd_com = 1'b0;
+    always @(posedge pclk) begin
+        wd_com <= pv && !pst[2] && |(pk & {pd[127:120] == 8'hBC, pd[119:112] == 8'hBC, pd[111:104] == 8'hBC, pd[103:96] == 8'hBC,
+                                           pd[95:88] == 8'hBC, pd[87:80] == 8'hBC, pd[79:72] == 8'hBC, pd[71:64] == 8'hBC,
+                                           pd[63:56] == 8'hBC, pd[55:48] == 8'hBC, pd[47:40] == 8'hBC, pd[39:32] == 8'hBC,
+                                           pd[31:24] == 8'hBC, pd[23:16] == 8'hBC, pd[15:8] == 8'hBC, pd[7:0] == 8'hBC});
+        if (prst || rbusy || !rxvalid || wd_com || wd_rst != 5'd0) wd_cnt <= 13'd0;
+        else wd_cnt <= wd_cnt + 1'b1;
+        if (prst) wd_rst <= 5'd0;
+        else if (wd_cnt[12]) wd_rst <= 5'd16;
+        else if (wd_rst != 5'd0) wd_rst <= wd_rst - 1'b1;
+    end
+    assign rx_wd_rst = wd_rst != 5'd0;
+`else
+    assign rx_wd_rst = 1'b0;
+`endif
     // ---------------- PhyStatus / RxStatus (pclk) ----------------
     reg [1:0]  pdq = 2'b00; reg [2:0] pdc = 3'd0;
     reg        detp = 1'b0, detw = 1'b0; reg [2:0] dds = 3'b000; reg [10:0] dcnt = 11'd0;

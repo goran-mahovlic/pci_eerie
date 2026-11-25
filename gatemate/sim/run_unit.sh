@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Jedinični testovi (TASK-6161): eerie_skp_eb na 7 odstupanja takta i eerie_scr8 izvorno vs EERIE_SCR8_MAT+PTREE.
-#   sim/run_unit.sh [skp|scr8|crc16|sve]   (skp ispituje izvorni spremnik; EB2: SKP_DEFS=-DEERIE_SKP_EB2)
+#   sim/run_unit.sh [skp|scr8|crc16|sve]   (skp ispituje izvorni spremnik; EB2: SKP_DEFS=-DEERIE_SKP_EB2; BRAM EB: SKP_DEFS=-DEERIE_SKP_EBB)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OSS=${OSS:-$(cd "$(dirname "$(command -v yosys)")/.." && pwd)}   # oss-cad-suite root (measured: 2026-11-17)
 export PATH=$OSS/bin:$PATH
 E=../rtl; B=build/sim/unit; mkdir -p $B; R=0
 if [ "${1:-sve}" = sve ] || [ "${1:-}" = skp ]; then
-  iverilog -g2005 ${SKP_DEFS:-} -I$E -o $B/tb_skp_eb.vvp -s tb_skp_eb sim/tb_skp_eb.v $E/eerie_skp_eb.v
+  iverilog -g2005 ${SKP_DEFS:-} -I$E -o $B/tb_skp_eb.vvp -s tb_skp_eb sim/tb_skp_eb.v $E/eerie_skp_eb.v $E/eerie_skp_ebb.v
   for p in ${PPM_LIST:-0 300 -300 600 -600}; do   # spec: +-300 ppm po taktu = +-600; PPM_LIST="1000 -1000" za marginu
     o=$(cd $B && vvp -n tb_skp_eb.vvp +ppm=$p | tr "\n" " " | grep -oE "ppm=.*(PASS|FAIL)"); echo "$o"; case $o in *PASS*) ;; *) R=1;; esac
   done

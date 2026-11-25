@@ -344,6 +344,9 @@ module pci_eerie #(
         .pipe_txdetectrx(PIPETXRCVRDET), .pipe_powerdown(p_powerdown), .pipe_rate(p_rate),
         .pipe_rxpolarity(rxpol), .i_pipe_phystatus(PIPERX0PHYSTATUS), .i_pipe_rxstatus(PIPERX0STATUS),
         .i_pipe_rxelecidle(PIPERX0ELECIDLE),
+`ifdef EERIE_RXLOCK_REC
+        .i_pipe_rxvalid(PIPERX0VALID),
+`endif
         .tx_mode(tx_mode), .tx_link(tx_link), .tx_link_pad(tx_link_pad), .tx_lane(tx_lane), .tx_lane_pad(tx_lane_pad),
         .tx_nfts(tx_nfts), .tx_rate(tx_rate), .tx_ctrl(tx_ctrl),
         .tx_ts_done(l_ts_done[0]), .tx_eios_done(l_eios_done[0]), .tx_idle_pair(l_idle_pair[0]), .tx_busy(l_busy[0]),
@@ -428,7 +431,15 @@ module pci_eerie #(
     wire        pltx_we, pltx_full;
     wire [66:0] pltx_wd;
     wire [7:0]  pltx_free;
-`ifdef EERIE_W16
+`ifdef EERIE_TXFIFO_PAIR
+    // TASK-6238 (EERIE_W16 + EERIE_1CLK): the transmit FIFO as pairs of entries in block RAM
+    eerie_pair_fifo #(.W(67), .AW(7)) tx_fifo (
+        .clk(uclk), .wr_rst(u_lrst), .wr_en(pltx_we), .wr_data(pltx_wd), .wr_last(pltx_wd[65]),
+        .wr_full(pltx_full), .wr_free(pltx_free),
+        .rd_rst(p_lrst || p_rst), .rd_n(pltx_rd_n), .rd_data(pltx_rd_data), .rd_data2(pltx_rd_data2),
+        .rd_empty(pltx_rd_empty), .rd_has2(pltx_rd_has2)
+    );
+`elsif EERIE_W16
     eerie_async_fifo2 #(.W(67), .AW(7), .PKT_MODE(1), .SYNC(FIFO_SYNC)) tx_fifo (
         .wr_clk(uclk), .wr_rst(u_lrst), .wr_en(pltx_we), .wr_data(pltx_wd), .wr_last(pltx_wd[65]),
         .wr_full(pltx_full), .wr_free(pltx_free),
@@ -460,6 +471,15 @@ module pci_eerie #(
     wire [11:0] lim_pd, lim_npd, lim_cpld, cons_pd, cons_npd, cons_cpld;
     wire [5:0]  inf_mask;
     wire        e_bad_tlp, e_bad_dllp, e_rro, e_rto, e_dlp;
+`ifdef EERIE_W8_RPLY
+    wire [15:0] rply_lim;
+`endif
+`ifdef EERIE_DBGCNT
+    wire [2:0]  dl_dbg_ev;
+`ifdef EERIE_ILA
+    wire [51:0] dl_ila;
+`endif
+`endif
     wire [31:0] dllp_rx_data;
     wire        dllp_rx_v;
     wire        txb_we, txb_re;
@@ -473,7 +493,11 @@ module pci_eerie #(
     localparam [15:0] UPDFC_P = 16'd750;
     localparam [7:0]  ACK_DLY = 8'd0;
 `elsif EERIE_W8
+`ifdef EERIE_ACK0
+    localparam [7:0]  ACK_DLY = 8'd0;   // TASK-6185 (#13, GSK): Ack as soon as due (W16 rule DL.ACK-LAT)
+`else
     localparam [7:0]  ACK_DLY = 8'd2;
+`endif
     // TASK-6170 (openPCIE_BFM rule FC.UPDATE-PERIOD): the user clock is 31.25 MHz with EERIE_W8, not 62.5;
     // 1500 clocks were 48 us (spec: 30 us, +50 %), 750 are 24 us as on the 16-bit path
     localparam [15:0] UPDFC_P = 16'd750;
@@ -490,6 +514,9 @@ module pci_eerie #(
 `ifdef EERIE_W16
         .link_gen2(u_rate),
 `endif
+`ifdef EERIE_W8_RPLY
+        .replay_lim(rply_lim),
+`endif
         .dl_up(dl_up), .dl_init(dl_init), .retrain_req(u_retrain),
         .plrx_d(plrx_rd_d), .plrx_empty(plrx_rd_empty), .plrx_rd(plrx_rd),
         .pltx_we(pltx_we), .pltx_wd(pltx_wd), .pltx_full(pltx_full), .pltx_free(pltx_free),
@@ -502,6 +529,12 @@ module pci_eerie #(
         .cons_ph(cons_ph), .cons_pd(cons_pd), .cons_nph(cons_nph), .cons_npd(cons_npd), .cons_cplh(cons_cplh), .cons_cpld(cons_cpld),
         .inf_mask(inf_mask),
         .err_bad_tlp(e_bad_tlp), .err_bad_dllp(e_bad_dllp), .err_replay_rollover(e_rro), .err_replay_timeout(e_rto),
+`ifdef EERIE_DBGCNT
+        .dbg_ev(dl_dbg_ev),
+`ifdef EERIE_ILA
+        .ila_p(dl_ila),
+`endif
+`endif
         .err_dl_protocol(e_dlp), .dllp_rx_data(dllp_rx_data), .dllp_rx_v(dllp_rx_v),
         .txb_we(txb_we), .txb_waddr(txb_waddr), .txb_wdata(txb_wdata), .txb_re(txb_re), .txb_raddr(txb_raddr),
         .txb_rdata(MIMTXRDATA)
@@ -532,6 +565,13 @@ module pci_eerie #(
     // transaction layer + configuration space
     // ------------------------------------------------------------------
     wire [15:0] c_command, c_status, c_devctl, c_devsts, c_lnksts, c_devctl2;
+`ifdef EERIE_W8_RPLY
+    // TASK-6190: REPLAY_T counts 4 symbol times per user clock (62.5 MHz); EERIE_W8 runs 8 (31.25 MHz), so the timer was
+    // twice too long there, and it followed the supported MPS (512: 700 clocks = 22.4 us) instead of the programmed one.
+    // Limit = 1.5 x PCIe 2.0 Table 3-4 (x1, 2.5 GT/s: 711/1248/1677/3213/6285 symbols; -0/+100 % allowed) in 8-symbol clocks
+    assign rply_lim = (c_devctl[7:5] == 3'd0) ? 16'd133 : (c_devctl[7:5] == 3'd1) ? 16'd234 :
+                      (c_devctl[7:5] == 3'd2) ? 16'd314 : (c_devctl[7:5] == 3'd3) ? 16'd602 : 16'd1178;
+`endif
     wire [7:0]  c_rootctl;
     wire [1:0]  c_pm_state;
     wire [2:0]  c_msi_mme;
@@ -884,7 +924,20 @@ module pci_eerie #(
         if (PIPETXRCVRDET && !dbg_det_q) dbg[47:40] <= dbg[47:40] + 1'b1;
         dbg[53:48] <= p_ltssm;
     end
-    assign DBGVECA = dbg; assign DBGVECB = 64'd0; assign DBGVECC = 12'd0;
+    assign DBGVECA = dbg;
+`ifdef EERIE_DBGCNT
+    // TASK-6184 (uclk pulses): [0] TLP accepted, [1] duplicate TLP, [2] Ack sent, [3] Nak sent, [4] bad TLP (LCRC/framing),
+    // [5] bad DLLP, [6] own replay timeout, [7] own REPLAY_NUM rollover
+`ifdef EERIE_ILA
+    // TASK-6190: [59:8] eerie_dll ILA probes
+    assign DBGVECB = {4'd0, dl_ila, e_rro, e_rto, e_bad_dllp, e_bad_tlp, dl_dbg_ev[2:1], dl_dbg_ev[0], tlrx_end && tlrx_ok};
+`else
+    assign DBGVECB = {56'd0, e_rro, e_rto, e_bad_dllp, e_bad_tlp, dl_dbg_ev[2:1], dl_dbg_ev[0], tlrx_end && tlrx_ok};
+`endif
+`else
+    assign DBGVECB = 64'd0;
+`endif
+    assign DBGVECC = 12'd0;
     assign DBGSCLRA = 1'b0; assign DBGSCLRB = 1'b0; assign DBGSCLRC = 1'b0; assign DBGSCLRD = 1'b0;
     assign DBGSCLRE = 1'b0; assign DBGSCLRF = 1'b0; assign DBGSCLRG = 1'b0; assign DBGSCLRH = 1'b0;
     assign DBGSCLRI = 1'b0; assign DBGSCLRJ = 1'b0; assign DBGSCLRK = 1'b0;

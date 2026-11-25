@@ -144,7 +144,7 @@ module tb_w8;
         while (!(ep_lnk && rp_lnk) && t < 400000) begin @(posedge uclk); t = t + 1; end
         if (!(ep_lnk && rp_lnk)) begin $display("FAIL: nema DL up (EP LTSSM 0x%02h, RP 0x%02h)", ep_ltssm, rp_ltssm); $finish; end
         repeat (200) @(posedge uclk);
-        cfgrd(10'd0, got);  check(got, bs(32'hE0E11204), "CfgRd0 0x00 ID");
+        cfgrd(10'd0, got);  check(got, bs(32'h4D321397), "CfgRd0 0x00 ID");
         cfgwr(10'd4, 32'hFFFFFFFF);
         cfgrd(10'd4, got);  check(got, bs(32'hFFFFF000), "BAR0 velicina");
         cfgwr(10'd4, bs(32'hC0000000));

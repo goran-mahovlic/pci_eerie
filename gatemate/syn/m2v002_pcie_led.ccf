@@ -1,0 +1,13 @@
+# TASK-6239: ULX5M-M2 v002 (ulx5m-m2 fa861c2, kicad_netlist.py U4): PERST#/CLKREQ# on bank SA (3V3_SA), LEDs on bank EB
+NET "clk_i"    Loc = "IO_SB_A8" | SCHMITT_TRIGGER=true;
+NET "clkreq_n" Loc = "IO_SA_B3";   # U4 CLKREQ#
+NET "perst_n"  Loc = "IO_SA_A1";   # U4 PERST#
+# v002 LED0..7 = IO_EB_A7,B6,A6,B5,A5,B4,A4,B3 (tinyDFU v002 led ccf)
+NET "led[0]" Loc = "IO_EB_A7" | DRIVE=12;
+NET "led[1]" Loc = "IO_EB_B6" | DRIVE=12;
+NET "led[2]" Loc = "IO_EB_A6" | DRIVE=12;
+NET "led[3]" Loc = "IO_EB_B5" | DRIVE=12;
+NET "led[4]" Loc = "IO_EB_A5" | DRIVE=12;
+NET "led[5]" Loc = "IO_EB_B4" | DRIVE=12;
+NET "led[6]" Loc = "IO_EB_A4" | DRIVE=12;
+NET "led[7]" Loc = "IO_EB_B3" | DRIVE=12;

@@ -91,9 +91,14 @@ module eerie_pl_rx_w16 (
     end
 
     // ---------------- descrambler ----------------
+`ifdef EERIE_SCR16_LITE
+    wire [15:0] s_com_d = {s_com[15:1], s_com[0] | s_skp[0]};   // word starts inside a SKP OS: LFSR = FFFFh
+`else
+    wire [15:0] s_com_d = s_com;
+`endif
     wire [127:0] d_d; wire [15:0] d_k; wire d_v; wire [SW-1:0] d_side;
     eerie_scr16 #(.SW(SW)) dscr (
-        .clk(clk), .rst(rst), .v(s_v), .d(s_d), .k(s_k), .scr(s_scr), .com(s_com), .skp(s_skp),
+        .clk(clk), .rst(rst), .v(s_v), .d(s_d), .k(s_k), .scr(s_scr), .com(s_com_d), .skp(s_skp),
         .side(s_side), .od(d_d), .ok(d_k), .ov(d_v), .oside(d_side)
     );
     wire [15:0] d_com = d_side[15:0],   d_skp = d_side[31:16],  d_stp = d_side[47:32], d_sdp = d_side[63:48],
@@ -131,6 +136,23 @@ module eerie_pl_rx_w16 (
         in8 = 1'b0;
         for (i = 0; i <= 8; i = i + 1) if (&d_idl16[i +: 8]) in8 = 1'b1;
     end
+`ifdef EERIE_RXW16_TSPRE
+    // TASK-6238: the TS body checks per COM position (1 bit each) instead of muxing 10 ID bytes + 16 K bits:
+    // ok = ID bytes (symbols 6..15) all equal and a TS1/TS2 ID, no K in symbols 3..15, K in 1/2 only as PAD
+    reg  [23:0] t_eq; reg [15:0] t_ok, t_ts2, t_inv; reg [7:0] t_id;
+    always @(*) begin
+        for (i = 0; i < 24; i = i + 1) t_eq[i] = wd[8*(i+6) +: 8] == wd[8*(i+7) +: 8];
+        for (i = 0; i < 16; i = i + 1) begin
+            t_id = wd[8*(i+6) +: 8];
+            t_ok[i] = (&t_eq[i +: 9]) && (t_id == 8'h4A || t_id == 8'h45 || t_id == 8'hB5 || t_id == 8'hBA) &&
+                      wk[i+3 +: 13] == 13'd0 && !(wk[i+1] && !wpad[i+1]) && !(wk[i+2] && !wpad[i+2]);
+            t_ts2[i] = t_id == 8'h45 || t_id == 8'hBA;
+            t_inv[i] = t_id == 8'hB5 || t_id == 8'hBA;
+        end
+    end
+    reg [15:0] a_ok, a_ts2, a_inv;
+    always @(posedge clk) begin a_ok <= t_ok; a_ts2 <= t_ts2; a_inv <= t_inv; end
+`endif
     reg        a_v; reg [3:0] a_p; reg [255:0] a_wd; reg [31:0] a_wk, a_wpad; reg a_eios, a_skp, a_idle;
     reg  [3:0] idle_run;                   // idle symbols at the end of the previous word (0..8)
     always @(posedge clk) begin
@@ -152,6 +174,18 @@ module eerie_pl_rx_w16 (
         b_k    <= a_wk[a_p +: 16];
         b_lpad <= a_wpad[a_p + 1]; b_npad <= a_wpad[a_p + 2];
     end
+`ifdef EERIE_RXW16_TSPRE
+    reg b_ok, b_ts2, b_inv;
+    always @(posedge clk) begin b_ok <= a_ok[a_p]; b_ts2 <= a_ts2[a_p]; b_inv <= a_inv[a_p]; end
+    always @(posedge clk) begin
+        os_ts_valid <= b_v && b_ok && !rst;
+        os_ts2      <= b_ts2;
+        os_ts_inv   <= b_inv;
+        os_link <= b_link; os_link_pad <= b_lpad; os_lane <= b_lane; os_lane_pad <= b_npad;
+        os_nfts <= b_nfts; os_rate <= b_rate; os_ctrl <= b_ctrl;
+        os_eios <= a_eios; os_skp <= a_skp; os_idle2 <= a_idle;
+    end
+`else
     // C: checks, events
     reg c_bad;
     always @(*) begin
@@ -167,6 +201,7 @@ module eerie_pl_rx_w16 (
         os_nfts <= b_nfts; os_rate <= b_rate; os_ctrl <= b_ctrl;
         os_eios <= a_eios; os_skp <= a_skp; os_idle2 <= a_idle;
     end
+`endif
 
     // ======================= packets =======================
     // PP0: in-packet mask for both start states (word begins outside / inside a packet): STP/SDP ..
@@ -189,6 +224,78 @@ module eerie_pl_rx_w16 (
             if (!v) begin mx = 16'd0; ni = 1'b0; hs = 1'b0; end
         end
     endtask
+`ifdef EERIE_RXW16_PPF
+    // TASK-6241: PP0 / PP1 shallow, at the same latency, instead of the 16-symbol serial scan (pscan: 17 levels)
+    // and the serial byte counters (u_cn / u_cf: 21 levels, the ep.app.clk critical path of G7H_s2 at 23.4 MHz).
+    // The packet state is a 2-state machine per symbol: f_x(0) = start (STP/SDP), f_x(1) = !K (any K inside
+    // a packet ends it). PP0 composes f_0..f_x as a Kogge-Stone prefix (4 mux levels) for both start states:
+    //   state before x = nib[x], mask = nib | start.
+    // The first start outside a packet (sp) without the scan: start state 0, the first STP/SDP; start state 1,
+    // the first STP/SDP after the first K (the K ends the packet the word began in). pre[x] = x >= sp (prefix OR).
+    // PP1: ranks from 4-byte groups (in-group prefix counts + group offsets), j0 = mask bytes before sp (mod 4).
+    integer    s, x, lv, sh2, g;
+    reg [15:0] f0 [0:4], f1 [0:4]; reg [15:0] nib [0:1], mq [0:1], mfq [0:1], prq [0:1]; reg [1:0] niq;
+    reg [15:0] st16, kb16, s1st;
+    always @(*) begin
+        for (x = 0; x < 16; x = x + 1) begin st16[x] = d_stp[x] | d_sdp[x]; f0[0][x] = st16[x]; f1[0][x] = !d_k[x]; end
+        for (lv = 0; lv < 4; lv = lv + 1) begin
+            sh2 = 1 << lv;
+            for (x = 0; x < 16; x = x + 1)
+                if (x >= sh2) begin       // P[x] o P[x - sh2]: the older function first
+                    f0[lv+1][x] = f0[lv][x - sh2] ? f1[lv][x] : f0[lv][x];
+                    f1[lv+1][x] = f1[lv][x - sh2] ? f1[lv][x] : f0[lv][x];
+                end else begin f0[lv+1][x] = f0[lv][x]; f1[lv+1][x] = f1[lv][x]; end
+        end
+        kb16[0] = 1'b0;
+        for (x = 1; x < 16; x = x + 1) kb16[x] = kb16[x-1] | d_k[x-1];     // a K before x
+        s1st = st16 & kb16;
+        prq[0][0] = st16[0]; prq[1][0] = s1st[0];
+        for (x = 1; x < 16; x = x + 1) begin prq[0][x] = prq[0][x-1] | st16[x]; prq[1][x] = prq[1][x-1] | s1st[x]; end
+        for (s = 0; s < 2; s = s + 1) begin
+            nib[s] = {s ? f1[4][14:0] : f0[4][14:0], s[0]};
+            mq[s]  = d_v ? (nib[s] | st16) : 16'd0;
+            mfq[s] = (d_v && prq[s][15]) ? (mq[s] & prq[s]) : mq[s];
+            niq[s] = d_v && (s ? f1[4][15] : f0[4][15]);
+        end
+    end
+    reg        q0_ni [0:1], q0_hs [0:1]; reg [15:0] q0_m [0:1], q0_mf [0:1];
+    reg [127:0] p0_d; reg [15:0] p0_k; reg p0_e;
+    always @(posedge clk) begin
+        for (s = 0; s < 2; s = s + 1) begin
+            q0_ni[s] <= niq[s]; q0_hs[s] <= d_v && prq[s][15]; q0_m[s] <= mq[s]; q0_mf[s] <= mfq[s];
+        end
+        p0_d <= d_d; p0_k <= d_k; p0_e <= d_err;
+    end
+    // PP1: ranks (4 bits per byte) and the counts; the bytes before sp are the mask bytes not in mf
+    reg        q1_ni [0:1], q1_hs [0:1]; reg [1:0] q1_j0 [0:1]; reg [4:0] q1_cn [0:1], q1_cf [0:1];
+    reg [15:0] q1_m [0:1], q1_mf [0:1]; reg [63:0] q1_rn [0:1], q1_rf [0:1];
+    reg [4:0]  u_on [0:4], u_of [0:4]; reg [63:0] u_rn, u_rf; reg [1:0] v_an, v_af, u_j0; reg [2:0] v_tn [0:3], v_tf [0:3];
+    reg [31:0] v_pn, v_pf; reg [15:0] u_b;
+    reg [127:0] pp_d; reg [15:0] pp_k; reg pp_e;
+    always @(posedge clk) begin
+        for (s = 0; s < 2; s = s + 1) begin
+            u_b = q0_m[s] & ~q0_mf[s]; u_j0 = 2'd0;
+            for (x = 0; x < 16; x = x + 1) u_j0 = u_j0 + u_b[x];
+            for (g = 0; g < 4; g = g + 1) begin
+                v_an = 2'd0; v_af = 2'd0; v_tn[g] = 3'd0; v_tf[g] = 3'd0;
+                for (x = 0; x < 4; x = x + 1) begin
+                    v_pn[2*(4*g+x) +: 2] = v_an; v_pf[2*(4*g+x) +: 2] = v_af;
+                    v_an = v_an + q0_m[s][4*g+x]; v_af = v_af + q0_mf[s][4*g+x];
+                    v_tn[g] = v_tn[g] + q0_m[s][4*g+x]; v_tf[g] = v_tf[g] + q0_mf[s][4*g+x];
+                end
+            end
+            u_on[0] = 5'd0; u_of[0] = 5'd0;
+            for (g = 0; g < 4; g = g + 1) begin u_on[g+1] = u_on[g] + v_tn[g]; u_of[g+1] = u_of[g] + v_tf[g]; end
+            for (x = 0; x < 16; x = x + 1) begin
+                u_rn[4*x +: 4] = u_on[x/4][3:0] + v_pn[2*x +: 2];
+                u_rf[4*x +: 4] = u_of[x/4][3:0] + v_pf[2*x +: 2];
+            end
+            q1_ni[s] <= q0_ni[s]; q1_hs[s] <= q0_hs[s]; q1_j0[s] <= u_j0; q1_cn[s] <= u_on[4]; q1_cf[s] <= u_of[4];
+            q1_m[s] <= q0_m[s]; q1_mf[s] <= q0_mf[s]; q1_rn[s] <= u_rn; q1_rf[s] <= u_rf;
+        end
+        pp_d <= p0_d; pp_k <= p0_k; pp_e <= p0_e;
+    end
+`else
     // (fsm_encoding none: yosys took q0_sp for a state machine and its extraction never ended)
     (* fsm_encoding = "none" *) reg [3:0] q0_sp [0:1];
     reg        q0_ni [0:1], q0_hs [0:1]; reg [15:0] q0_m [0:1];
@@ -222,6 +329,7 @@ module eerie_pl_rx_w16 (
         end
         pp_d <= p0_d; pp_k <= p0_k; pp_e <= p0_e;
     end
+`endif
     // PA: the start state is a single select; a start off a slot boundary drops the partial slot and
     // the bytes before the start
     reg        in_pkt; reg [1:0] phase;
@@ -229,8 +337,18 @@ module eerie_pl_rx_w16 (
     wire       flush = q1_hs[ss] && ((phase + q1_j0[ss]) & 2'd3) != 2'd0;
     wire [4:0] cnt_all = flush ? q1_cf[ss] : q1_cn[ss];
     reg [127:0] pa_d; reg [15:0] pa_k, pa_m; reg pa_e, pa_fl; reg [63:0] pa_rk; reg [4:0] pa_cnt;
+`ifdef EERIE_RXW16_CNET
+    // TASK-6238: byte x moves down by z = x - rank (the masked-out bytes before it)
+    wire [63:0] rk_sel = flush ? q1_rf[ss] : q1_rn[ss];
+    reg  [63:0] z_sel;
+    always @(*) for (x = 0; x < 16; x = x + 1) z_sel[4*x +: 4] = x[3:0] - rk_sel[4*x +: 4];
+`endif
     always @(posedge clk) begin
+`ifdef EERIE_RXW16_CNET
+        pa_rk <= z_sel; pa_cnt <= rst ? 5'd0 : cnt_all;
+`else
         pa_rk <= flush ? q1_rf[ss] : q1_rn[ss]; pa_cnt <= rst ? 5'd0 : cnt_all;
+`endif
         if (rst) begin in_pkt <= 1'b0; phase <= 2'd0; end
         else begin
             in_pkt <= q1_ni[ss];
@@ -241,6 +359,29 @@ module eerie_pl_rx_w16 (
     end
     // PB: compaction (output byte j = the masked byte of rank j)
     reg [7:0] cw [0:15]; reg [15:0] cwk;
+`ifdef EERIE_RXW16_CNET
+    // TASK-6238: compress network, 4 stages (LSB first: byte moves down by 1, 2, 4, 8 when that bit of its
+    // z is set; collision free for a compaction), instead of the 16 x 16 rank match; pa_rk holds z
+    reg [143:0] ce [0:4]; reg [15:0] cv [0:4]; reg [63:0] cz [0:4]; integer st, sh;
+    reg         c_stay, c_mv;
+    always @(*) begin
+        for (i = 0; i < 16; i = i + 1) begin
+            ce[0][9*i +: 9] = pa_m[i] ? {pa_k[i], pa_d[8*i +: 8]} : 9'd0;
+            cv[0][i] = pa_m[i]; cz[0][4*i +: 4] = pa_rk[4*i +: 4];
+        end
+        for (st = 0; st < 4; st = st + 1) begin
+            sh = 1 << st;
+            for (i = 0; i < 16; i = i + 1) begin
+                c_stay = cv[st][i] && !cz[st][4*i + st];
+                c_mv   = (i + sh < 16) ? (cv[st][(i + sh) % 16] && cz[st][4*((i + sh) % 16) + st]) : 1'b0;
+                ce[st+1][9*i +: 9] = (c_stay ? ce[st][9*i +: 9] : 9'd0) | (c_mv ? ce[st][9*((i + sh) % 16) +: 9] : 9'd0);
+                cz[st+1][4*i +: 4] = c_stay ? cz[st][4*i +: 4] : c_mv ? cz[st][4*((i + sh) % 16) +: 4] : 4'd0;
+                cv[st+1][i] = c_stay || c_mv;
+            end
+        end
+        for (j = 0; j < 16; j = j + 1) begin cw[j] = ce[4][9*j +: 8]; cwk[j] = ce[4][9*j + 8]; end
+    end
+`else
     always @(*) begin
         for (j = 0; j < 16; j = j + 1) begin
             cw[j] = 8'd0; cwk[j] = 1'b0;
@@ -249,6 +390,7 @@ module eerie_pl_rx_w16 (
             end
         end
     end
+`endif
     reg [127:0] pb_d; reg [15:0] pb_k; reg [4:0] pb_n; reg pb_e, pb_fl;
     always @(posedge clk) begin
         for (j = 0; j < 16; j = j + 1) pb_d[8*j +: 8] <= cw[j];

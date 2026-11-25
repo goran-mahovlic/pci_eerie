@@ -1,0 +1,10 @@
+# T3_s3: netlist build/gm/P3_tmg/top.json (e7d4ccc3b289) seed=3 pnr='--tmg-ripup' nextpnr="nextpnr-himbaechel" -- Next Generation Place and Route (Version nextpnr-0.11.1-111-gc22d0709) 2026-11-25T00:12:18+00:00 (2236 s)
+  SERDES:       1/      1   100%
+  CPE_LT:   28057/  40960    68%
+  CPE_FF:   10172/  40960    24%
+  RAM_HALF:      25/     64    39%
+  POSTROUTEMax frequency for clock 'phy.clk_cfg': 65.51 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock 'phy.clk_pll': 89.49 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock  'ep.app.clk': 22.09 MHz (FAIL at 31.25 MHz)
+nextpnr rc=143
+  zadnja iteracija: iter=20 wires=1456730 overused=18016 overuse=18117 resources=80483 overused=506 overuse=710 tmgfail=160 archfail=NA

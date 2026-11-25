@@ -24,6 +24,9 @@ module eerie_dll #(
     input             rst,
     input             link_up,          // from LTSSM (synchronized)
     input             link_l0,          // LTSSM in L0 (replay timer runs only then)
+`ifdef EERIE_W8_RPLY
+    input      [15:0] replay_lim,       // TASK-6190: replay timer limit (user clocks) from the programmed MPS
+`endif
 `ifdef EERIE_W16
     input             link_gen2,        // TASK-6173: 5.0 GT/s (the user clock is twice as fast as at 2.5 GT/s)
 `endif
@@ -79,6 +82,12 @@ module eerie_dll #(
     output reg        err_replay_rollover,
     output reg        err_replay_timeout,
     output reg        err_dl_protocol,
+`ifdef EERIE_DBGCNT
+    output     [2:0]  dbg_ev,           // TASK-6184: {Nak sent, Ack sent, duplicate TLP received} pulses
+`endif
+`ifdef EERIE_ILA
+    output     [51:0] ila_p,            // TASK-6190: {DLL state, seqB, seqA, events} for eerie_ila (DBGVECB[59:8])
+`endif
     output reg [31:0] dllp_rx_data,     // last received good DLLP
     output reg        dllp_rx_v,
 
@@ -220,7 +229,16 @@ module eerie_dll #(
             if (e_v && e_eop && !e_dllp && !e_bad && !e_null && (rx_accept || rx_dup)) begin
                 ack_req <= 1'b1;
                 if (!ack_req) ack_timer <= ACK_DELAY;
+`ifdef EERIE_ACK_SEQ
+            // TASK-6195: ack_sent is registered, so it arrives one clock after the scheduler picked the Ack; a TLP
+            // that ended in that clock already moved NEXT_RCV_SEQ, but the Ack went out with the older sequence
+            // number. Clear the request only when the Ack sent covers NEXT_RCV_SEQ - 1 (dllp_word[11:0] is the Ack's
+            // sequence number in this clock, T_DLLP); otherwise the last TLP of a burst stays unacknowledged until
+            // the host's replay timer (A7RC: DL.ACK-LAT on posted bursts)
+            end else if (ack_sent && dllp_word[11:0] == next_rcv_seq - 1'b1) ack_req <= 1'b0;
+`else
             end else if (ack_sent) ack_req <= 1'b0;
+`endif
             else if (ack_timer != 8'd0) ack_timer <= ack_timer - 1'b1;
         end
     end
@@ -320,13 +338,28 @@ module eerie_dll #(
         // two register stages, the value is conservative because TLPs are written before it updates
         free_beats_r <= free_beats;
         used_desc_r  <= used_desc;
+`ifdef EERIE_DLL_SLPAR
+        txq_slots <= (link_rst || !dl_up) ? 6'd0 : sl_par;
+`else
         sl = free_beats_r >> SLOT_SH;
         if (NDESC - 1 - used_desc_r < sl) sl = NDESC - 1 - used_desc_r;
         if (MAX_UNACKED - used_desc_r < sl) sl = MAX_UNACKED - used_desc_r;
         if (sl < 0) sl = 0;
         if (sl > 63) sl = 63;
         txq_slots <= (link_rst || !dl_up) ? 6'd0 : (sl[5:0] > 6'd2 ? sl[5:0] - 6'd2 : 6'd0);
+`endif
     end
+`ifdef EERIE_DLL_SLPAR
+    // TASK-6241: the same value without the 32-bit integer chain (19.7 levels on W16): the three limits minus
+    // the margin of 2 in parallel (9-bit signed), the minimum by three parallel comparisons, negative -> 0
+    wire [TXB_AW-SLOT_SH:0] sl_c = free_beats_r >> SLOT_SH;
+    // (as the integer form: the unsigned difference wraps above the limit, so that limit does not apply)
+    wire signed [8:0] sl_a = (used_desc_r > NDESC - 1) ? 9'sd127 : $signed(9'(NDESC - 3)) - $signed({3'd0, used_desc_r});
+    wire signed [8:0] sl_b = (used_desc_r > MAX_UNACKED) ? 9'sd127 : $signed(9'(MAX_UNACKED - 2)) - $signed({3'd0, used_desc_r});
+    wire signed [8:0] sl_cs = (sl_c > 63) ? 9'sd61 : $signed({1'b0, 8'(sl_c)}) - 9'sd2;
+    wire signed [8:0] sl_m = (sl_a <= sl_b && sl_a <= sl_cs) ? sl_a : (sl_b <= sl_cs) ? sl_b : sl_cs;
+    wire [5:0] sl_par = sl_m[8] ? 6'd0 : sl_m[5:0];
+`endif
 
     always @(posedge clk) begin
         txb_we <= 1'b0;
@@ -449,9 +482,17 @@ module eerie_dll #(
     // in-flight reads must always fit in the FIFO: require room for them + a margin
     reg        fifo_room;
     reg        fifo_dllp_ok;
+`ifdef EERIE_DLL_FREER
+    reg        fifo_free124;
+`else
+    wire       fifo_free124 = pltx_free >= 8'd124;
+`endif
     always @(posedge clk) begin
         fifo_room    <= (pltx_free > (TXB_RLAT + 6)) && !pltx_full;
         fifo_dllp_ok <= (pltx_free > 8'd4) && !pltx_full;
+`ifdef EERIE_DLL_FREER
+        fifo_free124 <= pltx_free >= 8'd124;      // TASK-6241: registered (tx_fifo pointers -> InitFC, 14 levels)
+`endif
     end
 
     // RAM read data path
@@ -480,6 +521,21 @@ module eerie_dll #(
 
     reg ack_sent_r, nak_sent_r;
     always @(*) begin ack_sent = ack_sent_r; nak_sent = nak_sent_r; end
+`ifdef EERIE_DBGCNT
+    assign dbg_ev = {nak_sent_r, ack_sent_r, e_v && e_eop && !e_dllp && !e_bad && !e_null && rx_dup};
+`endif
+`ifdef EERIE_ILA
+    // TASK-6190: events {rollover, bad TLP/DLLP, dup rx, TLP rx ok, Ack/Nak sent, DL protocol err, replay_req (level),
+    // replay timeout, Nak rx, Ack rx, TLP sent replay, TLP sent new}; seqA = TLP sent / ACKD_SEQ, seqB = AckNak_Seq rx /
+    // Ack sent / NEXT_RCV_SEQ
+    wire ila_tail = (ts == T_TAIL);
+    assign ila_p = {link_l0, dls, txq_slots, d_send - d_ack, replay_timer_on,
+                    ev_acknak ? ev_seq : (ack_sent_r ? dllp_word[11:0] : next_rcv_seq),
+                    ila_tail ? send_seq : ackd_seq,
+                    err_replay_rollover, err_bad_tlp | err_bad_dllp, e_v && e_eop && !e_dllp && !e_bad && !e_null && rx_dup,
+                    tlrx_end && tlrx_ok, ack_sent_r, err_dl_protocol, replay_req, err_replay_timeout,
+                    ev_acknak && ev_nak, ev_acknak && !ev_nak, ila_tail && !f_new, ila_tail && f_new};
+`endif
 
     // DLLP word builders
     function [31:0] mk_fc;
@@ -521,7 +577,11 @@ module eerie_dll #(
                         purge_v <= 1'b1; purge_n <= a_ahead;
                         replay_num <= 2'd0;
                         replay_timer <= 16'd0;
+`ifdef EERIE_RPLY_ON
+                        replay_timer_on <= (next_tx_seq != a_seq + 12'd1) || (ts == T_TAIL && f_new);
+`else
                         replay_timer_on <= (a_ahead != a_outst);
+`endif
                     end
                     ackd_seq <= a_seq;
                     if (a_nak) replay_req <= 1'b1;
@@ -537,8 +597,16 @@ module eerie_dll #(
                 end
             end
             // ---------------- replay timer ----------------
+`ifdef EERIE_RPLY_ON
+            if (replay_timer_on && !(a_busy && a_ahead <= a_outst && a_ahead != 12'd0)) begin   // (1): the Ack restart stands
+`else
             if (replay_timer_on) begin
+`endif
+`ifdef EERIE_W8_RPLY
+                if (replay_timer >= replay_lim) begin
+`else
                 if (replay_timer >= REPLAY_TIMEOUT) begin
+`endif
                     replay_timer <= 16'd0;
                     replay_req <= 1'b1;
                     err_replay_timeout <= 1'b1;
@@ -570,7 +638,7 @@ module eerie_dll #(
                     s_ptr <= d_ack; send_seq <= ackd_seq + 1'b1;
                 end else if (dls == DL_FC1 || dls == DL_FC2) begin
                     // keep the InitFC backlog small: the PHY only sends packets in L0
-                    if (fifo_dllp_ok && pltx_free >= 8'd124) begin
+                    if (fifo_dllp_ok && fifo_free124) begin
                         ts <= T_DLLP;
                         initfc_rr <= (initfc_rr == 2'd2) ? 2'd0 : initfc_rr + 1'b1;
 `ifdef EERIE_DLL_FCSET

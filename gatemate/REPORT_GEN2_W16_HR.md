@@ -1,7 +1,7 @@
 # GateMate PCIe Gen2 — EERIE_W16 (128-bitni PIPE) i promjena brzine 2,5 → 5,0 GT/s u simulaciji
 
 TASK-6173, 19. 11. 2026., Jelena. Goranova uputa 18. 11. 22:55: W16 je u redu jer bržu logiku na GateMateu teško
-dobivamo, a **prije HW-a ide simulacija**. Fork `goran-mahovlic/pci_eerie`
+dobivamo, a **prije HW-a ide simulacija**. Repo `~/app/raid/projekti/ulx5m-gs-pcie`, fork `goran-mahovlic/pci_eerie`
 grana **gatemate-w16** (na gatemate-w8). Mjerenja: `mjerenja/t6173/`.
 
 ## Sažetak

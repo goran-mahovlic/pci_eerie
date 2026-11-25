@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: CERN-OHL-P-2.0
-// Jedinični test eerie_skp_eb (TASK-6161): wclk 31,25 MHz, rclk pomaknut za PPM (+ sporiji, - brži).
+// Jedinični test eerie_skp_eb (TASK-6161; -DEERIE_SKP_EBB: eerie_skp_ebb, TASK-6176): wclk 31,25 MHz, rclk pomaknut za PPM (+ sporiji, - brži).
 // Ulaz: nasumični podatci + SKP OS (COM + 3 SKP) svakih ~1180 simbola na bilo kojem položaju + COM bez SKP-a.
 // Provjera: izlaz bez SKP simbola == ulaz bez SKP simbola; svaki SKP OS na izlazu ima 1..5 SKP; nema podljeva.
 `timescale 1ps / 1ps
@@ -36,8 +36,13 @@ module tb_skp_eb;
         end else w_v <= 0;
     end
     wire r_v; wire [63:0] r_d; wire [7:0] r_k; wire [2:0] r_st; wire [4:0] r_fill;
+`ifdef EERIE_SKP_EBB
+    eerie_skp_ebb eb (.wclk(wclk), .wrst(rst), .w_v(w_v), .w_d(w_d), .w_k(w_k), .w_err(1'b0),
+        .rclk(rclk), .rrst(rst), .r_v(r_v), .r_d(r_d), .r_k(r_k), .r_status(r_st), .r_fill(r_fill));
+`else
     eerie_skp_eb eb (.wclk(wclk), .wrst(rst), .w_v(w_v), .w_d(w_d), .w_k(w_k), .w_err(1'b0),
         .rclk(rclk), .rrst(rst), .r_v(r_v), .r_d(r_d), .r_k(r_k), .r_status(r_st), .r_fill(r_fill));
+`endif
     // ---------------- provjera ----------------
     integer n_ins = 0, n_del = 0, n_under = 0, n_bad = 0, n_os = 0, run = 0, n_runbad = 0, started = 0, nout = 0;
     integer fmin = 99, fmax = 0;

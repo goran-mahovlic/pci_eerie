@@ -84,10 +84,20 @@ module eerie_scr16 #(
         for (i = 0; i < 16; i = i + 1) kb[i] = f_lfsr_byte(kf[i]);
     end
     reg [7:0] sb [0:15];
+`ifdef EERIE_SCR16_LITE
+    // TASK-6238: no SKP before the first COM of a word (the TX words; RX: a word that starts inside a SKP OS
+    // has its symbol 0 SKP marked as COM by the caller, the LFSR is FFFFh there): a symbol before the first
+    // COM uses ADV^i(lfsr), no candidate mux on the lfsr path
+    always @(*) for (i = 0; i < 16; i = i + 1) sb[i] = q_c[i] ? kb[q_n[i][3:0]] : cb[i];
+    always @(posedge clk) begin
+        if (rst) lfsr <= 16'hFFFF;
+        else if (q_v) lfsr <= q_c16 ? kf[q_n[16]] : ca[16];
+`else
     always @(*) for (i = 0; i < 16; i = i + 1) sb[i] = q_c[i] ? kb[q_n[i][3:0]] : cb[q_n[i][3:0]];
     always @(posedge clk) begin
         if (rst) lfsr <= 16'hFFFF;
         else if (q_v) lfsr <= q_c16 ? kf[q_n[16]] : ca[q_n[16]];
+`endif
         for (i = 0; i < 16; i = i + 1) od[8*i +: 8] <= q_scr[i] ? (q_d[8*i +: 8] ^ sb[i]) : q_d[8*i +: 8];
         ok <= q_k; ov <= q_v && !rst; oside <= q_side;
     end

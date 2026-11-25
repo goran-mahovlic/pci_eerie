@@ -20,3 +20,4 @@
 ../rtl/eerie_pl_rx_w16.v
 ../rtl/eerie_slot_fifo.v
 ../rtl/eerie_async_fifo2.v
+../rtl/eerie_pair_fifo.v

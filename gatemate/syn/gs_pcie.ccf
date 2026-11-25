@@ -1,0 +1,14 @@
+# TASK-6184: ULX5M-GS v005 (ulx5m-gs-hw, kicad_netlist.py) on ULX4M-PCIe-IO in the CM5 (.21) PCIe slot.
+# PERST#/CLKREQ# have no FPGA ball on GS (J1.9 PCInRES, J1.2 PCIe_CLK_nREQ end at the connector) -> not in the top.
+# SerDes (U11/V11 RX, U13/V13 TX, T12/T13 SER_CLK from X2) is the fixed CC_SERDES block, no pin constraints.
+NET "clk_i"  Loc = "IO_SB_A8" | SCHMITT_TRIGGER=true;   # U4.N14 Y1 25 MHz
+# LED0..7 (lvds.kicad_sch D9..D16, anode at the FPGA, active high) = the same balls as M2 v001
+NET "led[0]" Loc = "IO_SB_A0" | DRIVE=12;   # U17
+NET "led[1]" Loc = "IO_SB_B0" | DRIVE=12;   # U18
+NET "led[2]" Loc = "IO_SB_A1" | DRIVE=12;   # R17
+NET "led[3]" Loc = "IO_SB_B1" | DRIVE=12;   # R18
+NET "led[4]" Loc = "IO_SB_B2" | DRIVE=12;   # P18
+NET "led[5]" Loc = "IO_SB_A2" | DRIVE=12;   # P17
+NET "led[6]" Loc = "IO_SB_B3" | DRIVE=12;   # M18
+NET "led[7]" Loc = "IO_SB_A3" | DRIVE=12;   # M17
+# UART to probe ld (if01): uart_tx IO_NB_B5, uart_rx IO_NA_B6 (gateware/ber/top_gs.ccf) - not used in this bit

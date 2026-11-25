@@ -34,10 +34,12 @@ module tb;
     end
   end
 
+  integer run_us = RUN_US;    // TASK-6192: +run_us=N (Recovery.Idle 2 ms timeouts need more than 4 ms)
   initial begin
+    void'($value$plusargs("run_us=%d", run_us));
     #(25ns) rst_n <= 1'b1;
-    #(RUN_US * 1us);
-    $display("tb: TIME LIMIT %0d us: no RC MODEL RESULT", RUN_US);
+    #(run_us * 1us);
+    $display("tb: TIME LIMIT %0d us: no RC MODEL RESULT", run_us);
     $fatal(1, "time limit");
   end
 

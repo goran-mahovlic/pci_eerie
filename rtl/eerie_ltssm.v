@@ -37,6 +37,9 @@ module eerie_ltssm #(
     input             i_pipe_phystatus,
     input      [2:0]  i_pipe_rxstatus,
     input             i_pipe_rxelecidle,
+`ifdef EERIE_RXLOCK_REC
+    input             i_pipe_rxvalid,    // TASK-6192: RxValid (lane 0) for the lost-lock Recovery
+`endif
 
     // TX path control
     output reg [2:0]  tx_mode,
@@ -184,7 +187,11 @@ module eerie_ltssm #(
     reg [3:0]  cnt_a, cnt_b;     // consecutive receive counters
     reg [7:0]  rx_rate_rec;
     reg        directed_speed_change, changed_speed_recovery, successful_speed_neg;
+`ifdef EERIE_RIDLE_RETRY
+    reg [7:0]  idle_to_rlock;    // TASK-6192: count (3.0 idle_to_rlock_transitioned), Detect only at FFh
+`else
     reg        idle_to_rlock;
+`endif
     reg        rx_ei_seen;
     reg        rx_ts2_seen;
     reg        cur_gen2;
@@ -295,6 +302,14 @@ module eerie_ltssm #(
 `endif
     end
 
+`ifdef EERIE_RXLOCK_REC
+    // TASK-6192: RxValid low for 64 clocks (2 us at 31.25 MHz) = lost lock
+    reg [6:0] rxd_cnt = 7'd0; reg rx_dead = 1'b0;
+    always @(posedge clk) begin
+        if (rst || i_pipe_rxvalid) rxd_cnt <= 7'd0; else if (!rxd_cnt[6]) rxd_cnt <= rxd_cnt + 1'b1;
+        rx_dead <= rxd_cnt[6];
+    end
+`endif
     // saturating increment helpers
     function [3:0] inc4(input [3:0] v); inc4 = (v == 4'hF) ? v : v + 1'b1; endfunction
 
@@ -561,7 +576,11 @@ module eerie_ltssm #(
                 if (rx_first && tx_idle_pair && tx_after != 6'h3F) tx_after <= tx_after + 1'b1;
                 if (a_ge4 && ta_ge8 && cnt_fresh) goto(ST_L0);
                 else if (to2ms) begin
+`ifdef EERIE_RIDLE_RETRY
+                    if (idle_to_rlock != 8'hFF) begin idle_to_rlock <= idle_to_rlock + 1'b1; goto(ST_RLOCK); end
+`else
                     if (!idle_to_rlock) begin idle_to_rlock <= 1'b1; goto(ST_RLOCK); end
+`endif
                     else goto(ST_DQUIET);
                 end
             end
@@ -572,7 +591,11 @@ module eerie_ltssm #(
                 if (os_ts_valid) begin
                     if (ts1 && os_rate[7] && both_gen2) ; // speed change request handled in RcvrLock
                     goto(ST_RLOCK);
+`ifdef EERIE_RXLOCK_REC
+                end else if (retrain_req || rx_dead) goto(ST_RLOCK);
+`else
                 end else if (retrain_req) goto(ST_RLOCK);
+`endif
                 else if (dsp_rt_q && !rt_taken) begin
                     rt_taken <= 1'b1; dsp_retrain_ack <= 1'b1; goto(ST_RLOCK);
                 end
@@ -718,8 +741,15 @@ module eerie_ltssm #(
                 else if (ts1 && os_ctrl[1]) goto(ST_DISABLED);
                 else if (ts1 && os_lane_pad) goto(ST_CLWSTART);
                 else if (a_ge4 && ta_ge8 && cnt_fresh) goto(ST_L0);
+`ifdef EERIE_RXLOCK_REC
+                else if (rx_dead && cnt_fresh) goto(ST_RLOCK);   // TASK-6192: not counted in idle_to_rlock
+`endif
                 else if (to2ms) begin
+`ifdef EERIE_RIDLE_RETRY
+                    if (idle_to_rlock != 8'hFF) begin idle_to_rlock <= idle_to_rlock + 1'b1; goto(ST_RLOCK); end
+`else
                     if (!idle_to_rlock) begin idle_to_rlock <= 1'b1; goto(ST_RLOCK); end
+`endif
                     else goto(ST_DQUIET);
                 end
             end

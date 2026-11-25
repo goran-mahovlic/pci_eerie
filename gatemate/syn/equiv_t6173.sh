@@ -5,7 +5,7 @@
 #   syn/equiv_t6173.sh [git-ref, default 1e67e34]
 set -uo pipefail
 cd "$(dirname "$0")/.."
-REF=${1:-2e68ff9}; OSS=${OSS:-$(cd "$(dirname "$(command -v yosys)")/.." && pwd)}; export PATH=$OSS/bin:$PATH
+REF=${1:-2e68ff9}; OSS=${OSS:-$HOME/app/raid/tools/oss-cad-suite-20261117}; export PATH=$OSS/bin:$PATH
 B=build/equiv; rm -rf $B; mkdir -p $B/gold; R=0
 git -C .. archive $REF rtl | tar -x -C $B/gold
 for cfg in "none:" "w8:-DEERIE_W8"; do n=${cfg%%:*}; D=${cfg#*:}

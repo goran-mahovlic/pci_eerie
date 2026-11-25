@@ -19,3 +19,4 @@ eerie_pl_tx_w16.v
 eerie_pl_rx_w16.v
 eerie_slot_fifo.v
 eerie_async_fifo2.v
+eerie_pair_fifo.v

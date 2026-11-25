@@ -1,0 +1,10 @@
+# T5_s2: netlist build/gm/P5_noeqa/top.json (c59f9f4c44c3) seed=2 pnr='--tmg-ripup' nextpnr="nextpnr-himbaechel" -- Next Generation Place and Route (Version nextpnr-0.11.1-111-gc22d0709) 2026-11-25T01:49:42+00:00 (2728 s)
+  SERDES:       1/      1   100%
+  CPE_LT:   28162/  40960    68%
+  CPE_FF:   10191/  40960    24%
+  RAM_HALF:      25/     64    39%
+  POSTROUTEMax frequency for clock 'phy.clk_cfg': 57.09 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock 'phy.clk_pll': 127.42 MHz (PASS at 31.25 MHz)
+  POSTROUTEMax frequency for clock  'ep.app.clk': 31.38 MHz (PASS at 31.25 MHz)
+  zadnja iteracija: iter=245 wires=1463015 overused=0 overuse=0 resources=75684 overused=0 overuse=0 tmgfail=0 archfail=0
+  bit build/gm/T5_s2/T5_s2.bit 872321 B sha256 e95bed7f39ae2404

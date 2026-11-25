@@ -1,0 +1,14 @@
+# TASK-6172: ULX5M-M2 v001 (ulx5m-m2 @ f7192d1 "Version 1.0", netlist from TASK-6171).
+# syn/m2_pcie.ccf had PERST# IO_SA_A1 / CLKREQ# IO_SA_B3 = v002 pins (on v001 those are LVDS1_C_P / LVDS1_D0_N).
+NET "clk_i"    Loc = "IO_SB_A8" | SCHMITT_TRIGGER=true;
+NET "clkreq_n" Loc = "IO_NB_A0";   # U4.B9  CLKREQ#
+NET "perst_n"  Loc = "IO_NB_B0";   # U4.A9  PERST#
+# v001 LEDs (top_m2p.ccf 62c1d39e): LED0..7 = IO_SB_A0,B0,A1,B1,B2,A2,B3,A3, active high
+NET "led[0]" Loc = "IO_SB_A0" | DRIVE=12;
+NET "led[1]" Loc = "IO_SB_B0" | DRIVE=12;
+NET "led[2]" Loc = "IO_SB_A1" | DRIVE=12;
+NET "led[3]" Loc = "IO_SB_B1" | DRIVE=12;
+NET "led[4]" Loc = "IO_SB_B2" | DRIVE=12;
+NET "led[5]" Loc = "IO_SB_A2" | DRIVE=12;
+NET "led[6]" Loc = "IO_SB_B3" | DRIVE=12;
+NET "led[7]" Loc = "IO_SB_A3" | DRIVE=12;

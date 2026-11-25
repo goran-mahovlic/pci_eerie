@@ -8,6 +8,9 @@
 // Plusargs: +pair=1  the other RX gearbox pairing (with the SerDes word phase from +verilator+seed+N: all 16
 //           COM positions); +gen1  the EP advertises 2.5 GT/s only
 // Plusargs: +ppm=N  the EP reference clock N ppm off (positive: slower), the host stays nominal
+// Plusargs (TASK-6241): +brk_us=T +brk_len_us=L +brk_dir=D  random bits on the line from T for L us (D: 1 host -> EP,
+//           2 EP -> host as electrical idle, 3 both): a lost link at 5.0 GT/s, the 24 ms RcvrLock timeouts and the fall back to 2.5 GT/s;
+//           +run_us=N  the time limit (4000 us)
 // The module must be "tb" with a task Fatal (pcieVHost calls tb.Fatal).
 module tb;
   localparam HALF_SER_PS   = 100;     // 5 GHz: the host divides it to 2.5 GHz at Gen1
@@ -17,7 +20,18 @@ module tb;
   logic rst_n = 1'b0;
   logic serclk = 1'b0, pcieclk2 = 1'b0, refclk = 1'b0, cfgclk = 1'b0;
   initial forever #(20ns) cfgclk = ~cfgclk;          // 25 MHz, the board's clk_i (SerDes register file)
-  logic ser_dn, ser_up, ser_up_n;
+  logic ser_dn, ser_up, ser_up_n, ser_dn_h;
+  // +brk: the line broken (random bits) for a while
+  int brk_us = 0, brk_len_us = 0, brk_dir = 3; bit brk = 1'b0, brk_r = 1'b0;
+  initial begin
+    if ($value$plusargs("brk_us=%d", brk_us)) begin
+      void'($value$plusargs("brk_len_us=%d", brk_len_us)); void'($value$plusargs("brk_dir=%d", brk_dir));
+      #(brk_us * 1us); brk = 1'b1; $display("%t tb: line broken (dir %0d) for %0d us", $time, brk_dir, brk_len_us);
+      #(brk_len_us * 1us); brk = 1'b0; $display("%t tb: line restored", $time);
+    end
+  end
+  always @(posedge serclk) brk_r <= $urandom & 1;
+  assign ser_dn = (brk && brk_dir[0]) ? brk_r : ser_dn_h;
 
   initial forever #(HALF_SER_PS * 1ps) serclk = ~serclk;
   initial forever #(HALF_PCIE2_PS * 1ps) pcieclk2 = ~pcieclk2;
@@ -39,10 +53,11 @@ module tb;
     end
   end
 
+  int run_us = RUN_US; initial void'($value$plusargs("run_us=%d", run_us));
   initial begin
     #(25ns) rst_n <= 1'b1;
-    #(RUN_US * 1us);
-    $display("tb: TIME LIMIT %0d us: no RC MODEL RESULT", RUN_US);
+    #(run_us * 1us);
+    $display("tb: TIME LIMIT %0d us: no RC MODEL RESULT", run_us);
     $fatal(1, "time limit");
   end
 
@@ -107,7 +122,7 @@ module tb;
   end
   always @(*) ui_ep_ps = (rate ? 200.0 : 400.0) * (1.0 + rt_ppm * 1.0e-6);
   ser_retimer u_rt (.serclk(serclk), .din(ser_up), .ui_in_ps(ui_ep_ps), .gen2(rate), .dout(ser_up_rt), .n_ins(rt_ins), .n_del(rt_del));
-  assign ser_up_rc = retime ? ser_up_rt : ser_up;
+  assign ser_up_rc = (brk && brk_dir[1]) ? 1'b0 : retime ? ser_up_rt : ser_up;   // EP -> host: electrical idle (the host model stops on random symbols)
 
   // ---------------- host ----------------
   PcieVhostSerial #(.LinkWidth(1), .NodeNum(2), .EndPoint(0), .Gen2Clk(1)) u_rc (
@@ -115,7 +130,7 @@ module tb;
     .LinkIn0(ser_up_rc), .LinkIn1(1'b0), .LinkIn2(1'b0), .LinkIn3(1'b0), .LinkIn4(1'b0), .LinkIn5(1'b0),
     .LinkIn6(1'b0), .LinkIn7(1'b0), .LinkIn8(1'b0), .LinkIn9(1'b0), .LinkIn10(1'b0), .LinkIn11(1'b0),
     .LinkIn12(1'b0), .LinkIn13(1'b0), .LinkIn14(1'b0), .LinkIn15(1'b0),
-    .LinkOut0(ser_dn), .LinkOut1(), .LinkOut2(), .LinkOut3(), .LinkOut4(), .LinkOut5(), .LinkOut6(),
+    .LinkOut0(ser_dn_h), .LinkOut1(), .LinkOut2(), .LinkOut3(), .LinkOut4(), .LinkOut5(), .LinkOut6(),
     .LinkOut7(), .LinkOut8(), .LinkOut9(), .LinkOut10(), .LinkOut11(), .LinkOut12(), .LinkOut13(),
     .LinkOut14(), .LinkOut15());
 

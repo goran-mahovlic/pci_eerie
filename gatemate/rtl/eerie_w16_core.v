@@ -133,8 +133,8 @@ module eerie_w16_core #(
         .TRNLNKUP(trn_lnk_up), .USERRSTN(usr_rstn),
         .CFGMSGDATA(msg_data), .CFGMSGRECEIVED(msg_rcvd),
         .CFGDSBUSNUMBER(ds_bus), .CFGDSDEVICENUMBER(5'd0), .CFGDSFUNCTIONNUMBER(3'd0),
-        .CFGVENDID(16'h1204), .CFGDEVID(RP ? 16'hE0E0 : 16'hE0E1), .CFGREVID(8'h01),
-        .CFGSUBSYSVENDID(16'h1204), .CFGSUBSYSID(16'h0001),
+        .CFGVENDID(16'h1397), .CFGDEVID(RP ? 16'h4D30 : 16'h4D32), .CFGREVID(8'h01),
+        .CFGSUBSYSVENDID(16'h1397), .CFGSUBSYSID(16'h0001),
         .PLLTSSMSTATE(ltssm), .PLPHYLNKUPN(phy_lnk_up_n)
     );
 endmodule
