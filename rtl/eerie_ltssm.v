@@ -18,6 +18,7 @@ module eerie_ltssm #(
     parameter MAX_RATE   = 1,       // 1: 2.5 GT/s, 2: 5.0 GT/s
     parameter FAST_TRAIN = 0,       // shorten timers for simulation
     parameter [7:0] US_DIV1 = 8'd124, // PIPE clocks per microsecond - 1 at 2.5 GT/s (TASK-6161: 30 at 31.25 MHz)
+    parameter [7:0] US_DIV2 = 8'd249, // ... at 5.0 GT/s (TASK-6173 EERIE_W16: 30 at 31.25 MHz)
     parameter [7:0] N_FTS_GEN1 = 8'd255,
     parameter [7:0] N_FTS_GEN2 = 8'd255,
     parameter       UPCONFIG   = 1,      // advertise Link Upconfigure Capability (TS2 symbol 4 bit 6)
@@ -36,6 +37,9 @@ module eerie_ltssm #(
     input             i_pipe_phystatus,
     input      [2:0]  i_pipe_rxstatus,
     input             i_pipe_rxelecidle,
+`ifdef EERIE_RXLOCK_REC
+    input             i_pipe_rxvalid,    // TASK-6192: RxValid (lane 0) for the lost-lock Recovery
+`endif
 
     // TX path control
     output reg [2:0]  tx_mode,
@@ -128,7 +132,7 @@ module eerie_ltssm #(
         us_tick <= 1'b0;
         if (rst || t_clr) begin
             us_div <= 8'd0; t_us <= 16'd0;
-        end else if (us_div == (pipe_rate ? 8'd249 : US_DIV1)) begin
+        end else if (us_div == (pipe_rate ? US_DIV2 : US_DIV1)) begin
             us_div <= 8'd0; us_tick <= 1'b1;
             if (t_us != 16'hFFFF) t_us <= t_us + 1'b1;
         end else us_div <= us_div + 1'b1;
@@ -183,7 +187,11 @@ module eerie_ltssm #(
     reg [3:0]  cnt_a, cnt_b;     // consecutive receive counters
     reg [7:0]  rx_rate_rec;
     reg        directed_speed_change, changed_speed_recovery, successful_speed_neg;
+`ifdef EERIE_RIDLE_RETRY
+    reg [7:0]  idle_to_rlock;    // TASK-6192: count (3.0 idle_to_rlock_transitioned), Detect only at FFh
+`else
     reg        idle_to_rlock;
+`endif
     reg        rx_ei_seen;
     reg        rx_ts2_seen;
     reg        cur_gen2;
@@ -283,10 +291,25 @@ module eerie_ltssm #(
     // registered Recovery.RcvrCfg rate decisions (rx_rate_rec only changes on received TS)
     reg  rr_spd, rr_nospd;
     always @(posedge clk) begin
+`ifdef EERIE_LTSSM_SPDDN
+        // TASK-6173: TS2s with speed_change on both sides go to Recovery.Speed, to the highest common rate
+        // (4.2.6.4.3), also when that is the current one; the downstream port keeps the upstream rule
+        rr_spd   <= rx_rate_rec[7] && (cur_gen2 || ((MAX_RATE >= 2) && rx_rate_rec[2]) || !DSP);
+        rr_nospd <= !rx_rate_rec[7] || (!cur_gen2 && !((MAX_RATE >= 2) && rx_rate_rec[2]) && DSP);
+`else
         rr_spd   <= rx_rate_rec[7] && (cur_gen2 || ((MAX_RATE >= 2) && rx_rate_rec[2]));
         rr_nospd <= !rx_rate_rec[7] || (!cur_gen2 && !((MAX_RATE >= 2) && rx_rate_rec[2]));
+`endif
     end
 
+`ifdef EERIE_RXLOCK_REC
+    // TASK-6192: RxValid low for 64 clocks (2 us at 31.25 MHz) = lost lock
+    reg [6:0] rxd_cnt = 7'd0; reg rx_dead = 1'b0;
+    always @(posedge clk) begin
+        if (rst || i_pipe_rxvalid) rxd_cnt <= 7'd0; else if (!rxd_cnt[6]) rxd_cnt <= rxd_cnt + 1'b1;
+        rx_dead <= rxd_cnt[6];
+    end
+`endif
     // saturating increment helpers
     function [3:0] inc4(input [3:0] v); inc4 = (v == 4'hF) ? v : v + 1'b1; endfunction
 
@@ -321,8 +344,14 @@ module eerie_ltssm #(
             ltssm_state <= st;
             sub_d <= sub;
             rs_go <= ei_time_ok && sub_d == 3'd4 && sub == 3'd4 && st == ST_RSPEED;
+`ifdef EERIE_W16
+            // TASK-6173: 16 symbols per clock, 31.25 / 15.625 MHz: 800 ns = 25 / 12.5, 6 us = 188 / 94 clocks
+            ei_time_ok <= (successful_speed_neg && t_cyc >= (pipe_rate ? 12'd26 : 12'd13)) ||
+                          (!successful_speed_neg && t_cyc >= (pipe_rate ? 12'd188 : 12'd94));
+`else
             ei_time_ok <= (successful_speed_neg && t_cyc >= (pipe_rate ? 12'd200 : 12'd100)) ||
                           (!successful_speed_neg && t_cyc >= (pipe_rate ? 12'd1500 : 12'd750));
+`endif
             in_l0 <= (st == ST_L0);
             hot_reset <= (st == ST_HOTRST);
             link_training <= (st >= ST_CLWSTART && st <= ST_CIDLE) || (st >= ST_RLOCK && st <= ST_RIDLE);
@@ -535,7 +564,9 @@ module eerie_ltssm #(
             ST_CIDLE: begin
                 tx_mode <= M_IDLE; link_up <= 1'b1; link_width <= cfg_w;
                 if (os_idle2) begin
-`ifdef EERIE_W8
+`ifdef EERIE_W16
+                    cnt_a <= 4'd8; // TASK-6173: os_idle2 = 8 consecutive idle symbols
+`elsif EERIE_W8
                     cnt_a <= 4'd8; // TASK-6161: x1 64-bit PIPE: os_idle2 = 8 consecutive idle symbols
 `else
                     cnt_a <= inc4(cnt_a);
@@ -545,7 +576,11 @@ module eerie_ltssm #(
                 if (rx_first && tx_idle_pair && tx_after != 6'h3F) tx_after <= tx_after + 1'b1;
                 if (a_ge4 && ta_ge8 && cnt_fresh) goto(ST_L0);
                 else if (to2ms) begin
+`ifdef EERIE_RIDLE_RETRY
+                    if (idle_to_rlock != 8'hFF) begin idle_to_rlock <= idle_to_rlock + 1'b1; goto(ST_RLOCK); end
+`else
                     if (!idle_to_rlock) begin idle_to_rlock <= 1'b1; goto(ST_RLOCK); end
+`endif
                     else goto(ST_DQUIET);
                 end
             end
@@ -556,7 +591,11 @@ module eerie_ltssm #(
                 if (os_ts_valid) begin
                     if (ts1 && os_rate[7] && both_gen2) ; // speed change request handled in RcvrLock
                     goto(ST_RLOCK);
+`ifdef EERIE_RXLOCK_REC
+                end else if (retrain_req || rx_dead) goto(ST_RLOCK);
+`else
                 end else if (retrain_req) goto(ST_RLOCK);
+`endif
                 else if (dsp_rt_q && !rt_taken) begin
                     rt_taken <= 1'b1; dsp_retrain_ack <= 1'b1; goto(ST_RLOCK);
                 end
@@ -578,7 +617,15 @@ module eerie_ltssm #(
                 if (os_ts_valid && ts_match) begin
                     rx_first <= 1'b1;
                     if (os_rate[7] == directed_speed_change) cnt_a <= inc4(cnt_a); else cnt_a <= 4'd0;
+`ifdef EERIE_LTSSM_SPDDN
+                    // TASK-6173 (openPCIE_BFM Speed(): the RC takes a 5.0 GT/s link back to 2.5 GT/s): a speed change
+                    // is also one down, from 5.0 GT/s to a partner that offers 2.5 GT/s only (4.2.6.4.1); upstream
+                    // took only TS1s offering 5.0 GT/s and stayed in RcvrLock (cnt_a never counts: speed_change differs);
+                    // an upstream port follows the partner's speed_change whatever the rates (also 2.5 -> 2.5)
+                    if (ts1 && os_rate[7] && (both_gen2 || cur_gen2 || !DSP)) begin
+`else
                     if (ts1 && os_rate[7] && both_gen2) begin
+`endif
                         cnt_b <= inc4(cnt_b);
                         if (cnt_b >= 4'd7 && !directed_speed_change) begin
                             directed_speed_change <= 1'b1; cnt_a <= 4'd0;
@@ -641,7 +688,12 @@ module eerie_ltssm #(
                     // send EIOS (1 at 2.5 GT/s, 2 at 5 GT/s) then electrical idle
                     tx_mode <= M_EIOS; rx_ei_seen <= rx_ei_seen | os_eios;
                     if (tx_eios_done) begin
+`ifdef EERIE_W16
+                        // TASK-6173: one 128-bit word is 4 EIOS (one at 2.5 GT/s, two at 5.0 GT/s are enough)
+                        if (1'b1) begin tx_mode <= M_EIDLE; sub <= 3'd1; end
+`else
                         if (cnt_a >= (cur_gen2 ? 4'd1 : 4'd0)) begin tx_mode <= M_EIDLE; sub <= 3'd1; end
+`endif
                         cnt_a <= inc4(cnt_a);
                     end
                 end
@@ -671,7 +723,9 @@ module eerie_ltssm #(
             ST_RIDLE: begin
                 tx_mode <= M_IDLE;
                 if (os_idle2) begin
-`ifdef EERIE_W8
+`ifdef EERIE_W16
+                    cnt_a <= 4'd8; // TASK-6173: os_idle2 = 8 consecutive idle symbols
+`elsif EERIE_W8
                     cnt_a <= 4'd8; // TASK-6161: x1 64-bit PIPE: os_idle2 = 8 consecutive idle symbols
 `else
                     cnt_a <= inc4(cnt_a);
@@ -687,8 +741,15 @@ module eerie_ltssm #(
                 else if (ts1 && os_ctrl[1]) goto(ST_DISABLED);
                 else if (ts1 && os_lane_pad) goto(ST_CLWSTART);
                 else if (a_ge4 && ta_ge8 && cnt_fresh) goto(ST_L0);
+`ifdef EERIE_RXLOCK_REC
+                else if (rx_dead && cnt_fresh) goto(ST_RLOCK);   // TASK-6192: not counted in idle_to_rlock
+`endif
                 else if (to2ms) begin
+`ifdef EERIE_RIDLE_RETRY
+                    if (idle_to_rlock != 8'hFF) begin idle_to_rlock <= idle_to_rlock + 1'b1; goto(ST_RLOCK); end
+`else
                     if (!idle_to_rlock) begin idle_to_rlock <= 1'b1; goto(ST_RLOCK); end
+`endif
                     else goto(ST_DQUIET);
                 end
             end

@@ -5,10 +5,12 @@
 // (ideal line: the bits between two edges are their distance in UI_IN), aligns on K28.5, keeps a symbol FIFO
 // that removes / repeats K28.0 (SKP, disparity neutral) inside SKP ordered sets, and sends at 2 serclk per UI.
 // Electrical idle (no edge for 40 UI) passes through as a constant 0, as the host's own idle.
+// TASK-6173: gen2 = 1 sends one bit per serclk (5.0 GT/s).
 module ser_retimer (
   input  logic serclk,       // 5 GHz: one UI out = 2 periods (the host's own bit clock)
   input  logic din,
   input  real  ui_in_ps,     // EP UI
+  input  logic gen2,         // TASK-6173: 5.0 GT/s: one UI out = 1 period
   output logic dout,
   output int   n_ins,
   output int   n_del
@@ -63,7 +65,7 @@ module ser_retimer (
   initial dout = 1'b0;
   always @(posedge serclk) begin
     ph <= !ph;
-    if (ph) begin
+    if (ph || gen2) begin
       if (ob == 10) begin
         if (!started && fifo.size() >= MID) started = 1'b1;
         if (started && fifo.size() > 0) begin

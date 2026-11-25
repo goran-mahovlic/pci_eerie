@@ -97,6 +97,46 @@ PASS, no receiver error in L0. What the models found and what was fixed: `REPORT
 IO_SA_A1, CLKREQ# (IO_SA_B3) held low. SerDes: 2.5 Gb/s from 100 MHz, the GS<->M2 2.5G link recipe.
 `SEED=1 SRNS=1 syn/m2_pcie.sh M2B_s1` (yosys + nextpnr `--tmg-ripup` + `gmpack --reset`).
 
+## Gen2: EERIE_W16 (128-bit PIPE, 5.0 GT/s at 31.25 MHz, TASK-6173)
+
+5.0 GT/s with 8 symbols per clock would need a 62.5 MHz PIPE clock, out of reach on GateMate. `EERIE_W16` puts the
+x1 lane on a **128-bit PIPE, 16 symbols per clock**: 31.25 MHz at 5.0 GT/s, 15.625 MHz at 2.5 GT/s (fixed width,
+the PIPE clock follows the rate). `EERIE_W8` stays the default GateMate build; without any define the core is
+upstream pci_eerie.
+
+| file | what |
+|---|---|
+| `rtl/eerie_scr16.v` (+ `eerie_lfsrmat16.vh`, `gen_lfsr_mat16.py`) | 16-symbol (de)scrambler: per-symbol LFSR state from 17 flat-matrix candidates, popcount tree |
+| `rtl/eerie_pl_rx_w16.v` | x1 RX for 16 symbols: ordered sets in a 2-word window (TS / EIOS / SKP / idle at any COM position), packet mask for both start states, compaction, slot queue (0..4 slots of 4 bytes per clock) |
+| `rtl/eerie_pl_tx_w16.v` | x1 TX for 16 symbols: one TS per word, EIEOS at 5.0 GT/s, SKP (+ 12 idle in L0), EIOS x4, packet beats of two FIFO entries |
+| `rtl/eerie_slot_fifo.v` | slot FIFO (2 RAM banks, 2 pair writes / 1 read per clock) in front of `eerie_pl_rx_ml` (N=4, 8 bytes per clock) |
+| `rtl/eerie_async_fifo2.v` | packet FIFO with a second read port (a 16-byte beat = two 8-byte entries) |
+| `rtl/eerie_skp_eb16.v` | the EERIE_SKP_EB2 elastic buffer for 16-symbol words (separate reference clocks) |
+| `rtl/pci_eerie.v`, `eerie_ltssm.v`, `eerie_dll.v` | `EERIE_W16` wiring; LTSSM `US_DIV2`, Recovery.Speed times and EIOS count for 16 symbols; UpdateFC period per rate |
+| option `EERIE_1CLK` | USERCLK == PIPECLK: the PL <-> DLL FIFOs without synchronizers (shorter Ack path) |
+| `rtl/eerie_w16_core.v`, `eerie_w16_ep.v`, `gs_w16_ep_1clk.v` | endpoint, `LINK_CAP_MAX_LINK_SPEED = 2` (parameter `MAX_GEN`) |
+| `rtl/eerie_ccs_phy16.v` | CC_SERDES PIPE glue: PCLK = PLL clock / 2, 2:1 gearbox, **PIPE Rate through the SerDes register file** (PLL off, `PLL_CFG1` OUT_DIVSEL M3 2 -> 1, PLL on, lock, PhyStatus), EB16 for SRNS |
+
+Design choice: the PHY layer runs at the full 16 bytes per clock; the link and transaction layers stay 64 bits wide
+(8 bytes per clock, 250 MB/s). Transmit is legal at any lower rate (idle between packets); on receive the slot
+FIFO takes up the difference, bounded by the credits the endpoint advertises (a 4 KB FIFO for 4.6 KB of posted
+data credits). A 128-bit DLL / TL would not fit the A1 next to the PHY (W8 is already 51 %); see the report.
+
+openSERDES_BFM models the rate change exactly as needed: `PLL_CFG1` is taken only with the PLL off, the PLL clock
+stops while it relocks (500 ns) and comes back at the new rate, so no glue was needed in the BFM.
+
+```
+sim/ser/run_ser16.sh build && sim/ser/run_ser16.sh run          # A7RC (Gen2): 2.5 -> Recovery.Speed -> 5.0, L0, CfgRd, BAR0
+SRNS=1 sim/ser/run_ser16.sh build && SRNS=1 sim/ser/run_ser16.sh run +ppm=-600   # EB16, EP reference 600 ppm fast
+PAIR=1 ... / EPGEN=1 ... / A7RC=0 ...                           # other gearbox pairing / Gen1-only EP / RC tester
+sim/ser/reg_ser16.sh                                            # regression, build/sim/reg16/summary.txt + com16.txt
+iverilog ... sim/tb_scr16_eq.v ; sim/tb_skp_eb16.v              # scr16 vs a per-symbol model, EB16 at +-300/600 ppm
+syn/equiv_t6173.sh                                              # default and EERIE_W8 builds unchanged (yosys equiv)
+SEED=1 syn/w16_pnr.sh W16A_s1                                   # CCGM1A1 at 31.25 MHz
+```
+
+Results: `REPORT_GEN2_W16_HR.md` (report, Croatian), `UPSTREAM_GEN2_W16.md` (issue / PR drafts, limits), `mjerenja/t6173/`.
+
 ## Build / measure
 
 ```

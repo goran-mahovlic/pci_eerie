@@ -8,7 +8,8 @@
 module eerie_async_fifo #(
     parameter W        = 64,
     parameter AW       = 4,        // depth = 2**AW
-    parameter PKT_MODE = 0
+    parameter PKT_MODE = 0,
+    parameter SYNC     = 0         // TASK-6173 (EERIE_1CLK): wr_clk == rd_clk, the pointers cross without synchronizers
 ) (
     input              wr_clk,
     input              wr_rst,
@@ -55,7 +56,7 @@ module eerie_async_fifo #(
         end else begin
             rptr_gray_w1 <= rptr_gray_r;
             rptr_gray_w2 <= rptr_gray_w1;
-            rptr_bin_w   <= gray2bin(rptr_gray_w2);
+            rptr_bin_w   <= SYNC ? rptr_bin_r : gray2bin(rptr_gray_w2);
             if (wr_en && !wr_full) begin
                 wptr_bin  <= wptr_bin + 1'b1;
                 wptr_gray <= bin2gray(wptr_bin + 1'b1);
@@ -70,7 +71,7 @@ module eerie_async_fifo #(
 
     // ---------------- read side ----------------
     (* ASYNC_REG = "TRUE" *) reg [AW:0] wptr_gray_r1, wptr_gray_r2;
-    assign rd_empty = (rptr_gray_r == wptr_gray_r2);
+    assign rd_empty = (rptr_gray_r == (SYNC ? pub_gray : wptr_gray_r2));
     assign rd_data  = mem[rptr_bin_r[AW-1:0]];
     always @(posedge rd_clk) begin
         if (rd_rst) begin

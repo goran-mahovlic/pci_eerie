@@ -4,6 +4,11 @@
 // Ne koristi pcie_7x (pcie_block, AXI mostovi i GT omotač su Xilinx datoteke) — samo rtl/ iz pci_eerie.
 // RP=0: endpoint (tip 0); RP=1: root port (samo za simulaciju petlje).
 `timescale 1ns / 1ps
+`ifdef EERIE_DEVID_GS
+`define EERIE_DEVID 16'h4753   // TASK-6184: ULX5M-GS ('GS')
+`else
+`define EERIE_DEVID 16'h4D32   // ULX5M-M2
+`endif
 module eerie_w8_core #(
     parameter        RP         = 0,
     parameter        FAST_TRAIN = "FALSE",
@@ -50,6 +55,12 @@ module eerie_w8_core #(
     // stanje
     output     [5:0]  ltssm,
     output            phy_lnk_up
+`ifdef EERIE_DBGCNT
+   ,output     [7:0]  dl_ev            // TASK-6184: DBGVECB[7:0]
+`endif
+`ifdef EERIE_ILA
+   ,output     [51:0] ila_p            // TASK-6190: DBGVECB[59:8] (eerie_dll ILA probes + DLL state)
+`endif
 );
     localparam RXAW = 10;   // VC0_RX_RAM_LIMIT = 0x3FF
 
@@ -74,6 +85,13 @@ module eerie_w8_core #(
     assign completer_id = cid;
     assign user_rst = !usr_rstn;
     assign phy_lnk_up = !phy_lnk_up_n;
+`ifdef EERIE_DBGCNT
+    wire [63:0] dbgvb;
+    assign dl_ev = dbgvb[7:0];
+`endif
+`ifdef EERIE_ILA
+    assign ila_p = dbgvb[59:8];
+`endif
     assign trn_tdst_rdy = tdst[0];
     assign trn_rd = rd128[63:0];
     assign trn_rrem = rrem2[0];
@@ -121,8 +139,11 @@ module eerie_w8_core #(
         .TRNLNKUP(trn_lnk_up), .USERRSTN(usr_rstn),
         .CFGMSGDATA(msg_data), .CFGMSGRECEIVED(msg_rcvd),
         .CFGDSBUSNUMBER(ds_bus), .CFGDSDEVICENUMBER(5'd0), .CFGDSFUNCTIONNUMBER(3'd0),
-        .CFGVENDID(16'h1204), .CFGDEVID(RP ? 16'hE0E0 : 16'hE0E1), .CFGREVID(8'h01),
-        .CFGSUBSYSVENDID(16'h1204), .CFGSUBSYSID(16'h0001),
+        .CFGVENDID(16'h1397), .CFGDEVID(RP ? 16'h4D30 : `EERIE_DEVID), .CFGREVID(8'h01),
+        .CFGSUBSYSVENDID(16'h1397), .CFGSUBSYSID(16'h0001),
         .PLLTSSMSTATE(ltssm), .PLPHYLNKUPN(phy_lnk_up_n)
+`ifdef EERIE_DBGCNT
+       ,.DBGVECB(dbgvb)
+`endif
     );
 endmodule

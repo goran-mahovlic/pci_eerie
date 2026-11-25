@@ -1,0 +1,6 @@
+# N18C_s2: netlist build/gm/M2C_s1/top.json (9d5145fffb37) seed=2 pnr='--tmg-ripup' nextpnr="nextpnr-himbaechel" -- Next Generation Place and Route (Version nextpnr-0.11.1-103-ge811ba48) 2026-11-18T23:21:40+00:00 (639 s)
+  # PREKINUTO ručno (TASK-6170, uputa #879): 20261118 je za GateMate P&R bit-identičan 20261117 — nedovršeno rutiranje, ne koristiti
+  SERDES:       1/      1   100%
+  CPE_LT:   26142/  40960    63%
+  CPE_FF:    9458/  40960    23%
+  RAM_HALF:      19/     64    29%

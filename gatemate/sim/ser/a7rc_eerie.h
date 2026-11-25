@@ -4,8 +4,8 @@
 #ifndef A7RC_EERIE_H
 #define A7RC_EERIE_H
 
-#define EP_VENDOR_ID          0x1204
-#define EP_DEVICE_ID          0xE0E1
+#define EP_VENDOR_ID          0x1397
+#define EP_DEVICE_ID          0x4D32
 
 // BAR0 4 KB, 32-bit memory, not prefetchable; BAR1-5 not implemented
 static const uint32_t ep_bar_size[FW_NUM_BARS] = {0xfffff000, 0x00000000, 0x00000000,

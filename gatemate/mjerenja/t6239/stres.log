@@ -1,0 +1,8 @@
+18:56:59 M2Y_s3 pciex1_gen=1 [t6239_bar0.py 500000 0 rw] krugova 142232 ok 142231 krivo 0 nijem 1 za 57.2 s Rollover+ Timeout+ Rollover- Timeout- 
+18:57:07 M2Y_s3 pciex1_gen=1 [t6239_niz.py 16 30] niz 16: krugova 8302 MWr 132832 krivo 0 nijem 1 za 4.6 s Rollover+ Timeout+ Rollover- Timeout- 
+18:57:11 M2Y_s3 pciex1_gen=1 [t6239_niz.py 64 30] niz 64: krugova 133 MWr 8512 krivo 0 nijem 1 za 0.4 s Rollover+ Timeout+ Rollover- Timeout- 
+18:55:58 M2Y_s3 pciex1_gen=1 [board=m2 TX_AMP=12 TX_SEL_POST=5 RX_CDR_CKI=0 RX_CDR_CKP=62 RX_ALIGN_COMMA_WORD=0 RX_AFE_PEAK=24 RX_EN_EQA=1] krugova/ok/krivo: 300/300/0/0 300/300/0/0 300/300/0/0 300/300/0/0 300/300/0/0
+18:59:24 M2G_s2 pciex1_gen=1 [t6239_bar0.py 500000 0 rw] krugova 500000 ok 500000 krivo 0 nijem 0 za 58.1 s Rollover+ Timeout+ Rollover- Timeout- 
+18:59:57 M2G_s2 pciex1_gen=1 [t6239_niz.py 16 30] niz 16: krugova 543039 MWr 8688624 krivo 0 nijem 0 za 30.0 s Rollover+ Timeout+ Rollover- Timeout- 
+19:00:01 M2G_s2 pciex1_gen=1 [t6239_niz.py 64 30] niz 64: krugova 260 MWr 16640 krivo 0 nijem 1 za 0.3 s Rollover+ Timeout+ Rollover- Timeout- 
+18:58:22 M2G_s2 pciex1_gen=1 [board=m2 TX_AMP=12 TX_SEL_POST=5 RX_CDR_CKI=0 RX_CDR_CKP=62 RX_ALIGN_COMMA_WORD=0 RX_AFE_PEAK=24 RX_EN_EQA=1] krugova/ok/krivo: 300/300/0/0 300/300/0/0 300/300/0/0 300/300/0/0 300/300/0/0

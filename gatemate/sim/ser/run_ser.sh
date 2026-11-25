@@ -2,6 +2,9 @@
 # TASK-6170: pci_eerie W8 EP behind ONE ccfpga_serdes (openSERDES_BFM) on the serial line, against
 # openPCIE_BFM's Artix-7 RC model (59 rules). Verilator.
 #   sim/ser/run_ser.sh [build|run] [+ppm=N] [+verilator+seed+N]     env: SRNS=1 (EB2 path), A7RC=1|0, NAME=obj dir
+#   TASK-6190: ACK_TICKS=N  the A7RC model Acks N ticks (~symbol times) after a TLP's END instead of 92 (a slow host, BCM2712)
+#   TASK-6195: FLOOD=1      build with the posted flood (run time: env A7RC_FLOOD=N:R[:gap_ns])
+#   TASK-6192: RCFG_DROP=1  build with sim/ser/ltssm_rcfg_drop.py (run time: env A7RC_RCFG_DROP=N, A7RC_RCFG_DROP_REC=k)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 R=$PWD; BFM=$R/ext/openPCIE_BFM; SBFM=$R/ext/openSERDES_BFM/1.gatemate/1.model
@@ -15,17 +18,31 @@ EOPTS="EERIE_W8 EERIE_DLL_CRCPRE EERIE_ML_CRCMAT EERIE_ML_DLCPRE EERIE_ML_QREG E
 DEFS="-DVPROC -DEXCLUDE_LTSSM -DVPROC_SV -DRC_GEN=2 -DA7RC_LITERAL=$A7RC -DA7RC_EP_EXPECT=\"a7rc_eerie.h\" -DSIM_SERIAL -DA7RC_NO_DMA"
 INC="-I$R/sim/ser -I$BFM/3.sw/a7rc -I$VIP_DIR/include"
 if [ "${1:-build}" = build ] || [ ! -x "$O/Vtb" ]; then
-  g++ -c -fPIC -O2 -std=c++20 -Wno-write-strings $DEFS $INC $BFM/3.sw/a7rc/VUserMain2.cpp -o $O/VUserMain2.o
+  VUM=$BFM/3.sw/a7rc/VUserMain2.cpp
+  if [ -n "${ACK_TICKS:-}" ]; then   # TASK-6190: a copy with the A7RC Ack delay changed (the submodule stays untouched)
+    sed "s/^#define A7RC_ACK_TICKS        92 /#define A7RC_ACK_TICKS        $ACK_TICKS /" $VUM > $O/VUserMain2_ack.cpp
+    grep -q "^#define A7RC_ACK_TICKS        $ACK_TICKS " $O/VUserMain2_ack.cpp; VUM=$O/VUserMain2_ack.cpp
+  fi
+  if [ -n "${FLOOD:-}" ]; then   # TASK-6195: a copy with the posted flood (sim/ser/a7rc_flood.inc) after the firmware
+    sed '/^    stim\[S_FW\] = tx_tag;/r '"$R"'/sim/ser/a7rc_flood.inc' $VUM > $O/VUserMain2_flood.cpp
+    grep -q A7RC_FLOOD $O/VUserMain2_flood.cpp; VUM=$O/VUserMain2_flood.cpp
+  fi
+  g++ -c -fPIC -O2 -std=c++20 -Wno-write-strings $DEFS $INC $VUM -o $O/VUserMain2.o
   g++ -c -fPIC -O2 -std=c++20 -Wno-write-strings $DEFS $INC $BFM/3.sw/a7rc/a7rc_check.cpp -o $O/a7rc_check.o
-  gcc -c -fPIC -O2 $DEFS $INC $BFM/3.sw/ltssm/ltssm.c -o $O/ltssm.o
+  LTC=$BFM/3.sw/ltssm/ltssm.c
+  if [ -n "${RCFG_DROP:-}" ]; then   # TASK-6192: a copy of ltssm.c whose RC loses the EP's first TS2s in Recovery.RcvrCfg
+    python3 $R/sim/ser/ltssm_rcfg_drop.py $LTC $O/ltssm_drop.c; LTC=$O/ltssm_drop.c
+  fi
+  gcc -c -fPIC -O2 $DEFS $INC -I$BFM/3.sw/ltssm $LTC -o $O/ltssm.o
   rm -f $O/libuser.a; ar cr $O/libuser.a $O/VUserMain2.o $O/a7rc_check.o $O/ltssm.o
   { for d in $EOPTS; do echo "+define+$d"; done; [ "$SRNS" = 1 ] && echo "+define+SRNS"; echo "+define+CDR_MODEL=$CDR"
     echo "+incdir+$VIP_DIR/hdl/headers"; echo "+incdir+$VIP_DIR/hdl"; echo "$VIP_DIR/hdl/headers/allheaders.svh"
     echo "$VIP_DIR/hdl/f_VProc.sv"; echo "$VIP_DIR/hdl/clkmux.sv"; echo "$VIP_DIR/hdl/Serialiser.sv"; echo "$VIP_DIR/hdl/pcieVHost.sv"
     echo "$SBFM/ccfpga_serdes_pkg.sv"; echo "$SBFM/ccfpga_serdes.BFM.sv"
-    echo "+incdir+$R/../rtl"; sed "s|^|$R/../rtl/|" $R/../rtl/files.f; echo "$R/../rtl/eerie_skp_eb.v"
+    echo "+incdir+$R/../rtl"; sed "s|^|$R/../rtl/|" $R/../rtl/files.f; echo "$R/../rtl/eerie_skp_eb.v"; echo "$R/../rtl/eerie_skp_ebb.v"
     echo "+incdir+$R/rtl"; echo "+incdir+$R/rtl"
     for f in rtl/eerie_ram_sdp.v rtl/eerie_w8_core.v rtl/eerie_bar0_app.v rtl/eerie_w8_ep.v rtl/eerie_bufg.v rtl/eerie_ccs_phy.v; do echo "$R/$f"; done
+    case " $EOPTS " in *" EERIE_ILA "*) echo "$R/rtl/eerie_ila.v";; esac   # TASK-6190
     echo "$R/sim/ser/ser_retimer.sv"; echo "$R/sim/ser/tb_ser.sv"; } > $O/files.f
   verilator --binary -sv --timing --timescale 1ns/1ps --top-module tb -Mdir $O/obj -j 8 \
     -Wno-fatal -Wno-WIDTH -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-UNOPTFLAT +define+VPROC_SV +define+VPROC_BYTE_ENABLE \
